@@ -23,8 +23,12 @@ pub(super) fn handle_syscall(tf: &mut TrapFrame) {
 #[unsafe(no_mangle)]
 fn x86_syscall_handler(tf: &mut TrapFrame) {
     super::uspace::switch_to_kernel_fs_base(tf);
+    #[cfg(target_os = "none")]
+    super::trap::unmask_irqs(tf);
     handle_syscall(tf);
     crate::trap::post_trap_callback(tf, true);
+    #[cfg(target_os = "none")]
+    super::trap::mask_irqs();
     super::uspace::switch_to_user_fs_base(tf);
 }
 
