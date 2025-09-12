@@ -119,6 +119,11 @@ impl TrapFrame {
         self.r[0] as _
     }
 
+    // TODO:
+    pub const fn sysno(&self) -> usize {
+        self.r[8] as usize
+    }
+
     /// Sets the return value register.
     pub const fn set_retval(&mut self, r0: usize) {
         self.r[0] = r0 as _;

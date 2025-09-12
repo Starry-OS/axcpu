@@ -201,3 +201,10 @@ pub fn enable_fp() {
     CPACR_EL1.write(CPACR_EL1::FPEN::TrapNothing);
     barrier::isb(barrier::SY);
 }
+
+pub fn user_copy(_dst: *mut u8, _src: *const u8, _size: usize) -> usize {
+    info!(
+        "Copy user data!"
+    );
+    0
+}

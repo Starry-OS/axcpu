@@ -29,11 +29,11 @@ enum TrapSource {
     LowerAArch32 = 3,
 }
 
-impl TrapSource {
-    fn is_from_user(&self) -> bool {
-        matches!(self, TrapSource::LowerAArch64 | TrapSource::LowerAArch32)
-    }
-}
+// impl TrapSource {
+//     fn is_from_user(&self) -> bool {
+//         matches!(self, TrapSource::LowerAArch64 | TrapSource::LowerAArch32)
+//     }
+// }
 
 #[unsafe(no_mangle)]
 fn invalid_exception(tf: &TrapFrame, kind: TrapKind, source: TrapSource) {
@@ -44,13 +44,47 @@ fn invalid_exception(tf: &TrapFrame, kind: TrapKind, source: TrapSource) {
 }
 
 #[unsafe(no_mangle)]
-fn handle_irq_exception(tf: &mut TrapFrame, source: TrapSource) {
-    crate::trap::pre_trap_callback(tf, source.is_from_user());
+fn handle_irq_exception(_tf: &mut TrapFrame, _source: TrapSource) {
+    // crate::trap::pre_trap_callback(tf, source.is_from_user());
     handle_trap!(IRQ, 0);
-    crate::trap::post_trap_callback(tf, source.is_from_user());
+    // crate::trap::post_trap_callback(tf, source.is_from_user());
 }
 
-fn handle_instruction_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
+#[unsafe(no_mangle)]
+fn handle_sync_exception(tf: &mut TrapFrame, _source: TrapSource) {
+    let esr = ESR_EL1.extract();
+    let iss = esr.read(ESR_EL1::ISS);
+    // crate::trap::pre_trap_callback(tf, source.is_from_user());
+    match esr.read_as_enum(ESR_EL1::EC) {
+        #[cfg(feature = "uspace")]
+        Some(ESR_EL1::EC::Value::SVC64) => {
+            // Do Not handle syscall here 
+            // tf.r[0] = crate::trap::handle_syscall(tf, tf.r[8] as usize) as u64;
+        }
+        Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => handle_instruction_abort(tf, iss, true),
+        Some(ESR_EL1::EC::Value::InstrAbortCurrentEL) => handle_instruction_abort(tf, iss, false),
+        Some(ESR_EL1::EC::Value::DataAbortLowerEL) => handle_data_abort(tf, iss, true),
+        Some(ESR_EL1::EC::Value::DataAbortCurrentEL) => handle_data_abort(tf, iss, false),
+        Some(ESR_EL1::EC::Value::Brk64) => {
+            debug!("BRK #{:#x} @ {:#x} ", iss, tf.elr);
+            tf.elr += 4;
+        }
+        _ => {
+            panic!(
+                "Unhandled synchronous exception @ {:#x}: ESR={:#x} (EC {:#08b}, ISS {:#x})\n{}",
+                tf.elr,
+                esr.get(),
+                esr.read(ESR_EL1::EC),
+                esr.read(ESR_EL1::ISS),
+                tf.backtrace()
+            );
+        }
+    }
+    // crate::trap::post_trap_callback(tf, source.is_from_user());
+}
+
+
+pub(crate) fn handle_instruction_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
     let mut access_flags = PageFaultFlags::EXECUTE;
     if is_user {
         access_flags |= PageFaultFlags::USER;
@@ -59,7 +93,7 @@ fn handle_instruction_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
 
     // Only handle Translation fault and Permission fault
     if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags, is_user)
+        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
     {
         panic!(
             "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
@@ -89,7 +123,7 @@ fn handle_data_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
 
     // Only handle Translation fault and Permission fault
     if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags, is_user)
+        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
     {
         panic!(
             "Unhandled {} Data Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
@@ -104,34 +138,3 @@ fn handle_data_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
     }
 }
 
-#[unsafe(no_mangle)]
-fn handle_sync_exception(tf: &mut TrapFrame, source: TrapSource) {
-    let esr = ESR_EL1.extract();
-    let iss = esr.read(ESR_EL1::ISS);
-    crate::trap::pre_trap_callback(tf, source.is_from_user());
-    match esr.read_as_enum(ESR_EL1::EC) {
-        #[cfg(feature = "uspace")]
-        Some(ESR_EL1::EC::Value::SVC64) => {
-            tf.r[0] = crate::trap::handle_syscall(tf, tf.r[8] as usize) as u64;
-        }
-        Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => handle_instruction_abort(tf, iss, true),
-        Some(ESR_EL1::EC::Value::InstrAbortCurrentEL) => handle_instruction_abort(tf, iss, false),
-        Some(ESR_EL1::EC::Value::DataAbortLowerEL) => handle_data_abort(tf, iss, true),
-        Some(ESR_EL1::EC::Value::DataAbortCurrentEL) => handle_data_abort(tf, iss, false),
-        Some(ESR_EL1::EC::Value::Brk64) => {
-            debug!("BRK #{:#x} @ {:#x} ", iss, tf.elr);
-            tf.elr += 4;
-        }
-        _ => {
-            panic!(
-                "Unhandled synchronous exception @ {:#x}: ESR={:#x} (EC {:#08b}, ISS {:#x})\n{}",
-                tf.elr,
-                esr.get(),
-                esr.read(ESR_EL1::EC),
-                esr.read(ESR_EL1::ISS),
-                tf.backtrace()
-            );
-        }
-    }
-    crate::trap::post_trap_callback(tf, source.is_from_user());
-}

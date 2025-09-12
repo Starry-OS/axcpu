@@ -107,3 +107,127 @@ impl core::ops::DerefMut for UspaceContext {
         &mut self.0
     }
 }
+
+
+
+use crate::trap::{ExceptionKind, ReturnReason};
+use core::ops::{Deref, DerefMut};
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExceptionInfo {
+    // pub e: E,
+    pub stval: usize,
+}
+
+impl ExceptionInfo {
+    pub fn kind(&self) -> ExceptionKind {
+        // match self.e {
+        //     E::Breakpoint => ExceptionKind::Breakpoint,
+        //     E::IllegalInstruction => ExceptionKind::IllegalInstruction,
+        //     E::InstructionMisaligned | E::LoadMisaligned | E::StoreMisaligned => {
+        //         ExceptionKind::Misaligned
+        //     }
+        //     _ => ExceptionKind::Other,
+        // }
+
+        ExceptionKind::Other
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct UserContext {
+    tf: TrapFrame,
+    sp_el1: u64,
+}
+
+impl Deref for UserContext {
+    type Target = TrapFrame;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tf
+    }
+}
+
+impl DerefMut for UserContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tf
+    }
+}
+
+impl From<TrapFrame> for UserContext {
+    fn from(tf: TrapFrame) -> Self {
+        Self {
+            tf,
+            sp_el1: 0,   // 默认初始化
+        }
+    }
+}
+
+
+use crate::aarch64::trap::handle_instruction_abort;
+
+impl UserContext {
+    pub fn run(&mut self) -> ReturnReason {
+        extern "C" {
+            pub fn task_in(base: usize) -> u16;
+        }
+
+        // test  => 0x82000004
+        // let addr: *mut u64 = 0xffff_0000_45a0_0000 as *mut u64;
+        // unsafe {
+        //     core::ptr::write_volatile(addr, 0);
+        // }
+
+        let base_addr: usize = self as *mut Self as usize;
+        let ret: u16 = unsafe { task_in(base_addr) };
+        
+        // 读取 ESR
+        let esr = unsafe {
+            let esr_val: u32;
+            core::arch::asm!("mrs {0:x}, esr_el1", out(reg) esr_val);
+            esr_val
+        };
+        let ec = (esr >> 26) & 0x3f;
+        let iss = esr & 0x01ff_ffff; // 低 25 位
+
+        info!("reason: {:#x}, esr: {:#x} <ec: {:#x} iss: {:#b}>", ret, esr, ec, iss);
+
+        match ec {
+            0x15 => { // SVC call
+                ReturnReason::Syscall
+            },
+            0x20 => { // Translation fault, level 1.
+                let ttbr0_el1: u64;
+                unsafe {
+                    core::arch::asm!(
+                        "mrs {0}, ttbr0_el1",
+                        out(reg) ttbr0_el1
+                    );
+                }
+
+                handle_instruction_abort(self, iss as u64, true);
+
+                info!("TTBR0_EL1 = {:#x}", ttbr0_el1);
+                info!("{:#?}", self);
+                panic!("Translation fault, level 1.");
+            }
+            _ => ReturnReason::Unknown
+        }
+
+    }
+
+    pub fn new(entry: usize, ustack_top: VirtAddr, _arg0: usize) -> Self {
+        info!("new ctx: entry={:#x}, ustack_top={:#x}", entry, ustack_top.as_usize());
+        Self {
+            tf: TrapFrame {
+                r: [0u64; 31],
+                usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
+                tpidr: 0,
+                elr: entry as u64,       // 用户入口地址
+                spsr: 0 | (0b0000<<4),        // 可根据 EL 设置初值   // 0001 0000 1100 0111 0000
+            },
+            sp_el1: 0,                  // EL1 栈指针
+        }
+    }
+}
