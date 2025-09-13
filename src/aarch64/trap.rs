@@ -54,6 +54,7 @@ fn handle_irq_exception(_tf: &mut TrapFrame, _source: TrapSource) {
 fn handle_sync_exception(tf: &mut TrapFrame, _source: TrapSource) {
     let esr = ESR_EL1.extract();
     let iss = esr.read(ESR_EL1::ISS);
+    warn!("handle trap in current el!");
     // crate::trap::pre_trap_callback(tf, source.is_from_user());
     match esr.read_as_enum(ESR_EL1::EC) {
         #[cfg(feature = "uspace")]

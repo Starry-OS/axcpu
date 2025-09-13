@@ -165,7 +165,68 @@ impl From<TrapFrame> for UserContext {
 }
 
 
-use crate::aarch64::trap::handle_instruction_abort;
+use page_table_entry::MappingFlags;
+use aarch64_cpu::registers::FAR_EL1;
+use aarch64_cpu::registers::ESR_EL1;
+use aarch64_cpu::registers::Readable;
+
+fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+    let mut access_flags = MappingFlags::EXECUTE;
+    if is_user {
+        access_flags |= MappingFlags::USER;
+    }
+    let vaddr = va!(FAR_EL1.get() as usize);
+
+    // Only handle Translation fault and Permission fault
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    {
+        panic!(
+            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            if is_user { "EL0" } else { "EL1" },
+            tf.elr,
+            vaddr,
+            ESR_EL1.get(),
+            access_flags,
+            tf,
+            tf.backtrace()
+        );
+    } else {
+        ReturnReason::PageFault(vaddr, access_flags)
+    }
+}
+
+
+fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+    let wnr = (iss & (1 << 6)) != 0; // WnR: Write not Read
+    let cm = (iss & (1 << 8)) != 0; // CM: Cache maintenance
+    let mut access_flags = if wnr & !cm {
+        MappingFlags::WRITE
+    } else {
+        MappingFlags::READ
+    };
+    if is_user {
+        access_flags |= MappingFlags::USER;
+    }
+    let vaddr = va!(FAR_EL1.get() as usize);
+
+    // Only handle Translation fault and Permission fault
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    {
+        panic!(
+            "Unhandled {} Data Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            if is_user { "EL0" } else { "EL1" },
+            tf.elr,
+            vaddr,
+            ESR_EL1.get(),
+            access_flags,
+            tf,
+            tf.backtrace()
+        );
+    } else {
+        ReturnReason::PageFault(vaddr, access_flags)
+    }
+}
+
 
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
@@ -173,44 +234,28 @@ impl UserContext {
             pub fn task_in(base: usize) -> u16;
         }
 
-        // test  => 0x82000004
-        // let addr: *mut u64 = 0xffff_0000_45a0_0000 as *mut u64;
-        // unsafe {
-        //     core::ptr::write_volatile(addr, 0);
-        // }
-
         let base_addr: usize = self as *mut Self as usize;
-        let ret: u16 = unsafe { task_in(base_addr) };
+        let el1_sp = self.sp_el1;
+
+        warn!("task in {:#x}, elr: {:#x}, el1 stack {:#x}", 
+            base_addr, self.tf.elr, el1_sp);
         
-        // 读取 ESR
-        let esr = unsafe {
-            let esr_val: u32;
-            core::arch::asm!("mrs {0:x}, esr_el1", out(reg) esr_val);
-            esr_val
-        };
-        let ec = (esr >> 26) & 0x3f;
-        let iss = esr & 0x01ff_ffff; // 低 25 位
+        let _: u16 = unsafe { task_in(base_addr) };
+        let esr = ESR_EL1.extract();
+        let iss = esr.read(ESR_EL1::ISS);
 
-        info!("reason: {:#x}, esr: {:#x} <ec: {:#x} iss: {:#b}>", ret, esr, ec, iss);
-
-        match ec {
-            0x15 => { // SVC call
+        match esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::SVC64) => {
+                info!("task return because syscall ...");
                 ReturnReason::Syscall
             },
-            0x20 => { // Translation fault, level 1.
-                let ttbr0_el1: u64;
-                unsafe {
-                    core::arch::asm!(
-                        "mrs {0}, ttbr0_el1",
-                        out(reg) ttbr0_el1
-                    );
-                }
-
-                handle_instruction_abort(self, iss as u64, true);
-
-                info!("TTBR0_EL1 = {:#x}", ttbr0_el1);
-                info!("{:#?}", self);
-                panic!("Translation fault, level 1.");
+            Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
+                info!("task return because InstrAbortLowerEL ...");
+                handle_instruction_abort_lower(&self.tf, iss, true)
+            }
+            Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
+                info!("task return because DataAbortLowerEL ...");
+                handle_data_abort_lower(&self.tf, iss, true)
             }
             _ => ReturnReason::Unknown
         }
