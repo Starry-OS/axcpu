@@ -122,11 +122,13 @@
     ldp     x27, x28, [sp, 8 * 8]
     ldp     x29, x30, [sp, 10 * 8]
     add     sp, sp, 12 * 8
-    
+    cbz     x30, .Ldeadloop
     ret
 
 .endm
 
+.Ldeadloop:
+    b .Ldeadloop 
 
 .global task_in
 .p2align 7
@@ -201,29 +203,38 @@ task_in:
 .p2align 11
 .global exception_vector_base
 exception_vector_base:
-    // current EL, with SP_EL0
-    INVALID_EXCP 0 0
-    INVALID_EXCP 1 0
-    INVALID_EXCP 2 0
-    INVALID_EXCP 3 0
-
-    // current EL, with SP_ELx
-    HANDLE_SYNC 1
-    HANDLE_IRQ 1
-    INVALID_EXCP 2 1
-    INVALID_EXCP 3 1
-
-    // lower EL, aarch64
-    TASK_EXIT 0 2
-    TASK_EXIT 1 2
-    INVALID_EXCP 2 2
-    INVALID_EXCP 3 2
-
-    // lower EL, aarch32
-    INVALID_EXCP 0 3
-    INVALID_EXCP 1 3
-    INVALID_EXCP 2 3
-    INVALID_EXCP 3 3
+curr_el_sp0_sync:
+    INVALID_EXCP 0 0               
+curr_el_sp0_irq:
+    INVALID_EXCP 1 0             
+curr_el_sp0_fiq:
+    INVALID_EXCP 2 0               
+curr_el_sp0_serror:
+    INVALID_EXCP 3 0               
+curr_el_spx_sync:
+    HANDLE_SYNC 1                   
+curr_el_spx_irq:
+    HANDLE_IRQ  1               
+curr_el_spx_fiq:
+    INVALID_EXCP 2 1               
+curr_el_spx_serror:
+    INVALID_EXCP 3 1              
+lower_el_aarch64_sync:
+    TASK_EXIT 0 2               
+lower_el_aarch64_irq:
+    TASK_EXIT 1 2                  
+lower_el_aarch64_fiq:
+    INVALID_EXCP 2 2                
+lower_el_aarch64_serror:
+    INVALID_EXCP 3 2                
+lower_el_aarch32_sync:
+    INVALID_EXCP 0 3              
+lower_el_aarch32_irq:
+    INVALID_EXCP 1 3              
+lower_el_aarch32_fiq:
+    INVALID_EXCP 2 3              
+lower_el_aarch32_serror:
+    INVALID_EXCP 3 3           
 
 .Lexception_return:
     RESTORE_REGS

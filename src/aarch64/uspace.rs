@@ -228,6 +228,45 @@ fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReas
 }
 
 
+/// Compare two memory regions as u64 words, dump both if any difference found.
+///
+/// # Safety
+/// Caller must ensure both addr1 and addr2 are valid for `num_words * 8` bytes.
+pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize) -> bool {
+    let ptr1 = addr1 as *const u64;
+    let ptr2 = addr2 as *const u64;
+
+    let mut equal = true;
+
+    for i in 0..num_words {
+        let val1 = *ptr1.add(i);
+        let val2 = *ptr2.add(i);
+        if val1 != val2 {
+            equal = false;
+            break;
+        }
+    }
+
+    if !equal {
+        warn!("Memory regions differ, dumping contents:");
+
+        warn!("Region 1 at {:#x}:", addr1);
+        for i in 0..num_words {
+            let val = *ptr1.add(i);
+            warn!("  [{:02}] = {:#018x}", i, val);
+        }
+
+        warn!("Region 2 at {:#x}:", addr2);
+        for i in 0..num_words {
+            let val = *ptr2.add(i);
+            warn!("  [{:02}] = {:#018x}", i, val);
+        }
+    }
+
+    equal
+}
+
+
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
         extern "C" {
