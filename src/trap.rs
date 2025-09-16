@@ -33,6 +33,26 @@ macro_rules! handle_trap {
     }}
 }
 
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExceptionSource {
+    CurrentSpEl0 = 0,
+    CurrentSpElx = 1,
+    LowerAarch64 = 2,
+    LowerAarch32 = 3,
+}
+
+pub const fn excp_mask(kind: u8, source: ExceptionSource) -> u16 {
+    1 << ((source as u8) * 4 + kind)
+}
+
+// 用例
+pub const TASK_EXIT_0_1: u16 = excp_mask(0, ExceptionSource::CurrentSpElx);
+pub const TASK_EXIT_1_1: u16 = excp_mask(1, ExceptionSource::CurrentSpElx);
+pub const TASK_EXIT_0_2: u16 = excp_mask(0, ExceptionSource::LowerAarch64);
+pub const TASK_EXIT_1_2: u16 = excp_mask(1, ExceptionSource::LowerAarch64);
+// 0x10, 0x20, 0x100, 0x200
+
 #[cfg(feature = "uspace")]
 #[derive(Debug, Clone, Copy)]
 pub enum ReturnReason {
@@ -41,6 +61,20 @@ pub enum ReturnReason {
     Syscall,
     PageFault(VirtAddr, PageFaultFlags),
     Exception(crate::uspace::ExceptionInfo),
+}
+
+impl ReturnReason {
+    /// 从 task_in() 返回的 bitmask 解码
+    pub fn from_mask(mask: u16) -> Self {
+        match mask {
+            TASK_EXIT_0_1 => ReturnReason::Syscall,    // TASK_EXIT 0 1
+            TASK_EXIT_1_1 => ReturnReason::Interrupt,  // TASK_EXIT 1 1
+            TASK_EXIT_0_2 => ReturnReason::Syscall,
+            TASK_EXIT_1_2 => ReturnReason::Interrupt,
+            _ => ReturnReason::Unknown,
+        }
+    }
+    
 }
 
 #[cfg(feature = "uspace")]

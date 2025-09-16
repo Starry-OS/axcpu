@@ -107,3 +107,211 @@ impl core::ops::DerefMut for UspaceContext {
         &mut self.0
     }
 }
+
+
+
+use crate::trap::{ExceptionKind, ReturnReason};
+use core::ops::{Deref, DerefMut};
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExceptionInfo {
+    // pub e: E,
+    pub stval: usize,
+}
+
+impl ExceptionInfo {
+    pub fn kind(&self) -> ExceptionKind {
+        // match self.e {
+        //     E::Breakpoint => ExceptionKind::Breakpoint,
+        //     E::IllegalInstruction => ExceptionKind::IllegalInstruction,
+        //     E::InstructionMisaligned | E::LoadMisaligned | E::StoreMisaligned => {
+        //         ExceptionKind::Misaligned
+        //     }
+        //     _ => ExceptionKind::Other,
+        // }
+
+        ExceptionKind::Other
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct UserContext {
+    tf: TrapFrame,
+    sp_el1: u64,
+}
+
+impl Deref for UserContext {
+    type Target = TrapFrame;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tf
+    }
+}
+
+impl DerefMut for UserContext {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tf
+    }
+}
+
+impl From<TrapFrame> for UserContext {
+    fn from(tf: TrapFrame) -> Self {
+        Self {
+            tf,
+            sp_el1: 0,   // 默认初始化
+        }
+    }
+}
+
+
+use page_table_entry::MappingFlags;
+use aarch64_cpu::registers::FAR_EL1;
+use aarch64_cpu::registers::ESR_EL1;
+use aarch64_cpu::registers::Readable;
+
+fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+    let mut access_flags = MappingFlags::EXECUTE;
+    if is_user {
+        access_flags |= MappingFlags::USER;
+    }
+    let vaddr = va!(FAR_EL1.get() as usize);
+
+    // Only handle Translation fault and Permission fault
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    {
+        panic!(
+            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            if is_user { "EL0" } else { "EL1" },
+            tf.elr,
+            vaddr,
+            ESR_EL1.get(),
+            access_flags,
+            tf,
+            tf.backtrace()
+        );
+    } else {
+        ReturnReason::PageFault(vaddr, access_flags)
+    }
+}
+
+
+fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+    let wnr = (iss & (1 << 6)) != 0; // WnR: Write not Read
+    let cm = (iss & (1 << 8)) != 0; // CM: Cache maintenance
+    let mut access_flags = if wnr & !cm {
+        MappingFlags::WRITE
+    } else {
+        MappingFlags::READ
+    };
+    if is_user {
+        access_flags |= MappingFlags::USER;
+    }
+    let vaddr = va!(FAR_EL1.get() as usize);
+
+    // Only handle Translation fault and Permission fault
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    {
+        panic!(
+            "Unhandled {} Data Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            if is_user { "EL0" } else { "EL1" },
+            tf.elr,
+            vaddr,
+            ESR_EL1.get(),
+            access_flags,
+            tf,
+            tf.backtrace()
+        );
+    } else {
+        ReturnReason::PageFault(vaddr, access_flags)
+    }
+}
+
+
+/// Compare two memory regions as u64 words, dump both if any difference found.
+///
+/// # Safety
+/// Caller must ensure both addr1 and addr2 are valid for `num_words * 8` bytes.
+pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize) -> bool {
+    let ptr1 = addr1 as *const u64;
+    let ptr2 = addr2 as *const u64;
+
+    let mut equal = true;
+
+    for i in 0..num_words {
+        let val1 = *ptr1.add(i);
+        let val2 = *ptr2.add(i);
+        if val1 != val2 {
+            equal = false;
+            break;
+        }
+    }
+
+    if !equal {
+        warn!("Memory regions differ, dumping contents:");
+
+        warn!("Region 1 at {:#x}:", addr1);
+        for i in 0..num_words {
+            let val = *ptr1.add(i);
+            warn!("  [{:02}] = {:#018x}", i, val);
+        }
+
+        warn!("Region 2 at {:#x}:", addr2);
+        for i in 0..num_words {
+            let val = *ptr2.add(i);
+            warn!("  [{:02}] = {:#018x}", i, val);
+        }
+    }
+
+    equal
+}
+
+
+impl UserContext {
+    pub fn run(&mut self) -> ReturnReason {
+        extern "C" {
+            pub fn task_in(base: usize) -> u16;
+        }
+
+        let base_addr: usize = self as *mut Self as usize;
+        let el1_sp = self.sp_el1;
+
+        warn!("task in {:#x}, elr: {:#x}, el1 stack {:#x}", 
+            base_addr, self.tf.elr, el1_sp);
+        
+        let _: u16 = unsafe { task_in(base_addr) };
+        let esr = ESR_EL1.extract();
+        let iss = esr.read(ESR_EL1::ISS);
+
+        match esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::SVC64) => {
+                info!("task return because syscall ...");
+                ReturnReason::Syscall
+            },
+            Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
+                info!("task return because InstrAbortLowerEL ...");
+                handle_instruction_abort_lower(&self.tf, iss, true)
+            }
+            Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
+                info!("task return because DataAbortLowerEL ...");
+                handle_data_abort_lower(&self.tf, iss, true)
+            }
+            _ => ReturnReason::Unknown
+        }
+
+    }
+
+    pub fn new(entry: usize, ustack_top: VirtAddr, _arg0: usize) -> Self {
+        info!("new ctx: entry={:#x}, ustack_top={:#x}", entry, ustack_top.as_usize());
+        Self {
+            tf: TrapFrame {
+                r: [0u64; 31],
+                usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
+                tpidr: 0,
+                elr: entry as u64,       // 用户入口地址
+                spsr: 0 | (0b0000<<4),        // 可根据 EL 设置初值   // 0001 0000 1100 0111 0000
+            },
+            sp_el1: 0,                  // EL1 栈指针
+        }
+    }
+}
