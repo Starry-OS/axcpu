@@ -2,7 +2,7 @@
 
 use memory_addr::VirtAddr;
 
-use crate::TrapFrame;
+use crate::{TrapFrame, aarch64::trap};
 
 /// Context to enter user space.
 pub struct UspaceContext(TrapFrame);
@@ -108,10 +108,14 @@ impl core::ops::DerefMut for UspaceContext {
     }
 }
 
-
+use core::{
+    arch::naked_asm,
+    mem::offset_of,
+    ops::{Deref, DerefMut},
+    ptr::addr_of,
+};
 
 use crate::trap::{ExceptionKind, ReturnReason};
-use core::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionInfo {
@@ -159,18 +163,15 @@ impl From<TrapFrame> for UserContext {
     fn from(tf: TrapFrame) -> Self {
         Self {
             tf,
-            sp_el1: 0,   // 默认初始化
+            sp_el1: 0, // 默认初始化
         }
     }
 }
 
-
+use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
 use page_table_entry::MappingFlags;
-use aarch64_cpu::registers::FAR_EL1;
-use aarch64_cpu::registers::ESR_EL1;
-use aarch64_cpu::registers::Readable;
 
-fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
     let mut access_flags = MappingFlags::EXECUTE;
     if is_user {
         access_flags |= MappingFlags::USER;
@@ -178,10 +179,12 @@ fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> Ret
     let vaddr = va!(FAR_EL1.get() as usize);
 
     // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100)
+    // IFSC or DFSC bits
     {
         panic!(
-            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} \
+             ({:?}):\n{:#x?}\n{}",
             if is_user { "EL0" } else { "EL1" },
             tf.elr,
             vaddr,
@@ -195,8 +198,7 @@ fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> Ret
     }
 }
 
-
-fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReason {
+fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
     let wnr = (iss & (1 << 6)) != 0; // WnR: Write not Read
     let cm = (iss & (1 << 8)) != 0; // CM: Cache maintenance
     let mut access_flags = if wnr & !cm {
@@ -210,7 +212,8 @@ fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReas
     let vaddr = va!(FAR_EL1.get() as usize);
 
     // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+    if !matches!(iss & 0b111100, 0b0100 | 0b1100)
+    // IFSC or DFSC bits
     {
         panic!(
             "Unhandled {} Data Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
@@ -226,7 +229,6 @@ fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool)-> ReturnReas
         ReturnReason::PageFault(vaddr, access_flags)
     }
 }
-
 
 /// Compare two memory regions as u64 words, dump both if any difference found.
 ///
@@ -266,20 +268,16 @@ pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize)
     equal
 }
 
-
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
-        extern "C" {
-            pub fn task_in(base: usize) -> u16;
+        debug!(
+            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x}",
+            self.tf.elr, self.sp_el1, self.tf.usp
+        );
+        unsafe {
+            enter_user(self);
         }
 
-        let base_addr: usize = self as *mut Self as usize;
-        let el1_sp = self.sp_el1;
-
-        warn!("task in {:#x}, elr: {:#x}, el1 stack {:#x}", 
-            base_addr, self.tf.elr, el1_sp);
-        
-        let _: u16 = unsafe { task_in(base_addr) };
         let esr = ESR_EL1.extract();
         let iss = esr.read(ESR_EL1::ISS);
 
@@ -287,7 +285,7 @@ impl UserContext {
             Some(ESR_EL1::EC::Value::SVC64) => {
                 info!("task return because syscall ...");
                 ReturnReason::Syscall
-            },
+            }
             Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
                 info!("task return because InstrAbortLowerEL ...");
                 handle_instruction_abort_lower(&self.tf, iss, true)
@@ -296,22 +294,79 @@ impl UserContext {
                 info!("task return because DataAbortLowerEL ...");
                 handle_data_abort_lower(&self.tf, iss, true)
             }
-            _ => ReturnReason::Unknown
+            _ => ReturnReason::Unknown,
         }
-
     }
 
     pub fn new(entry: usize, ustack_top: VirtAddr, _arg0: usize) -> Self {
-        info!("new ctx: entry={:#x}, ustack_top={:#x}", entry, ustack_top.as_usize());
+        info!(
+            "new ctx: entry={:#x}, ustack_top={:#x}",
+            entry,
+            ustack_top.as_usize()
+        );
         Self {
             tf: TrapFrame {
                 r: [0u64; 31],
                 usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
                 tpidr: 0,
                 elr: entry as u64,       // 用户入口地址
-                spsr: 0 | (0b0000<<4),        // 可根据 EL 设置初值   // 0001 0000 1100 0111 0000
+                spsr: 0 | (0b0000 << 4), // 可根据 EL 设置初值   // 0001 0000 1100 0111 0000
             },
-            sp_el1: 0,                  // EL1 栈指针
+            sp_el1: 0, // EL1 栈指针
         }
     }
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn enter_user(_ctx: &mut UserContext) {
+    naked_asm!(
+        "
+        sub     sp,   sp, 12 * 8
+        stp     x29, x30, [sp,10 * 8]
+        stp     x27, x28, [sp, 8 * 8]
+        stp     x25, x26, [sp, 6 * 8]
+        stp     x23, x24, [sp, 4 * 8]
+        stp     x21, x22, [sp, 2 * 8]
+        stp     x19, x20, [sp, 2 * 0]
+
+        mov     x8,  sp
+        msr     sp_el1, x8
+
+        str     x8, [x0, {sp_el1}] 
+
+        // -- restore user context --
+        
+        mrs     x8, tpidr_el0
+        msr     tpidrro_el0, x8
+
+        ldp     x8,  x9,   [x0, {elr_el1}] 
+        msr     elr_el1,   x8
+        msr     spsr_el1,  x9
+
+        ldp     x8,  x9,   [x0, {sp_el0}] 
+        msr     sp_el0,    x8
+        msr     tpidr_el0, x9
+
+        ldr     x30,        [x0, 30 * 8]
+        ldp     x28, x29, [x0, 28 * 8]
+        ldp     x26, x27, [x0, 26 * 8]
+        ldp     x24, x25, [x0, 24 * 8]
+        ldp     x22, x23, [x0, 22 * 8]
+        ldp     x20, x21, [x0, 20 * 8]
+        ldp     x18, x19, [x0, 18 * 8]
+        ldp     x16, x17, [x0, 16 * 8]
+        ldp     x14, x15, [x0, 14 * 8]
+        ldp     x12, x13, [x0, 12 * 8]
+        ldp     x10, x11, [x0, 10 * 8]
+        ldp     x8, x9,   [x0, 8 * 8]
+        ldp     x6, x7,   [x0, 6 * 8]
+        ldp     x4, x5,   [x0, 4 * 8]
+        ldp     x2, x3,   [x0, 2 * 8]
+        ldp     x0, x1,   [x0]
+        eret
+        ",
+        sp_el1 = const offset_of!(UserContext, sp_el1),
+        elr_el1 = const offset_of!(TrapFrame, elr),
+        sp_el0 = const offset_of!(TrapFrame, usp),
+    )
 }
