@@ -168,7 +168,7 @@ impl From<TrapFrame> for UserContext {
     }
 }
 
-use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
+use aarch64_cpu::registers::{CurrentEL, ESR_EL1, FAR_EL1, Readable};
 use page_table_entry::MappingFlags;
 
 fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
@@ -271,13 +271,16 @@ pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize)
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
         debug!(
-            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x}",
-            self.tf.elr, self.sp_el1, self.tf.usp
+            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x}, el{}",
+            self.tf.elr,
+            self.sp_el1,
+            self.tf.usp,
+            CurrentEL.read(CurrentEL::EL)
         );
         unsafe {
             enter_user(self);
         }
-
+        debug!("Returned from user space");
         let esr = ESR_EL1.extract();
         let iss = esr.read(ESR_EL1::ISS);
 

@@ -76,53 +76,12 @@
 .macro TASK_EXIT, kind, source
 .p2align 7
 
-    # sp => sp_el1
-    sub     sp, sp, {trapframe_size}
-    stp     x0, x1, [sp]
-    stp     x2, x3, [sp, 2 * 8]
-    stp     x4, x5, [sp, 4 * 8]
-    stp     x6, x7, [sp, 6 * 8]
-    stp     x8, x9, [sp, 8 * 8]
-    stp     x10, x11, [sp, 10 * 8]
-    stp     x12, x13, [sp, 12 * 8]
-    stp     x14, x15, [sp, 14 * 8]
-    stp     x16, x17, [sp, 16 * 8]
-    stp     x18, x19, [sp, 18 * 8]
-    stp     x20, x21, [sp, 20 * 8]
-    stp     x22, x23, [sp, 22 * 8]
-    stp     x24, x25, [sp, 24 * 8]
-    stp     x26, x27, [sp, 26 * 8]
-    stp     x28, x29, [sp, 28 * 8]
-    str     x30, [sp, 30 * 8]
-
-    mrs     x9, sp_el0
-    mrs     x10, tpidr_el0
-    mrs     x11, elr_el1
-    mrs     x12, spsr_el1
-    stp     x9, x10, [sp, 31 * 8]
-    stp     x11, x12, [sp, 33 * 8]
-
-    # restore kernel tpidr_el0
-    mrs     x1, tpidrro_el0
-    msr     tpidr_el0, x1
-
-    // clear SP_EL0 for kernel use (e.g., to store the current task pointer)
-    msr     sp_el0, xzr
-
-    mov     x0, #(1 << (\source * 4 + \kind))
-
-    add     x9, sp, {trapframe_size}
-    ldr     x10, [x9] 
-    mov     sp, x10   
-    
     ldp     x19, x20, [sp]
     ldp     x21, x22, [sp, 2 * 8]
     ldp     x23, x24, [sp, 4 * 8]
     ldp     x25, x26, [sp, 6 * 8]
     ldp     x27, x28, [sp, 8 * 8]
     ldp     x29, x30, [sp, 10 * 8]
-    add     sp, sp, 12 * 8
-    cbz     x30, .Ldeadloop
     ret
 
 .endm
