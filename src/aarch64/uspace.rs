@@ -112,7 +112,7 @@ impl From<TrapFrame> for UserContext {
     }
 }
 
-use aarch64_cpu::registers::{CurrentEL, ESR_EL1, FAR_EL1, Readable};
+use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
 use page_table_entry::MappingFlags;
 
 fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
@@ -220,6 +220,12 @@ impl UserContext {
         );
         let tp_kind = unsafe { _enter_user(self) };
         debug!("Returned from user space with TrapKind: {:?}", tp_kind);
+
+        if matches!(tp_kind, TrapKind::Irq) {
+            handle_trap!(IRQ, 0);
+            return ReturnReason::Interrupt;
+        }
+
         let esr = ESR_EL1.extract();
         let iss = esr.read(ESR_EL1::ISS);
 
