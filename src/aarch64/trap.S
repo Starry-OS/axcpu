@@ -1,5 +1,4 @@
 .macro SAVE_REGS
-    sub     sp, sp, {trapframe_size}
     stp     x0, x1, [sp]
     stp     x2, x3, [sp, 2 * 8]
     stp     x4, x5, [sp, 4 * 8]
@@ -65,6 +64,7 @@
 
 .macro INVALID_EXCP, kind, source
 .p2align 7
+    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     mov     x1, \kind
@@ -73,9 +73,10 @@
     b       .Lexception_return
 .endm
 
-.macro TASK_EXIT, kind, source
+.macro TASK_EXIT, kind
 .p2align 7
     SAVE_REGS
+    mov   x0, \kind
     b _user_trap_entry
 
 .endm
@@ -85,6 +86,7 @@
 
 .macro HANDLE_SYNC, source
 .p2align 7
+    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     mov     x1, \source
@@ -94,6 +96,7 @@
 
 .macro HANDLE_IRQ, source
 .p2align 7
+    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     mov     x1, \source
@@ -122,9 +125,9 @@ curr_el_spx_fiq:
 curr_el_spx_serror:
     INVALID_EXCP 3 1              
 lower_el_aarch64_sync:
-    TASK_EXIT 0 2               
+    TASK_EXIT {kind_sync}               
 lower_el_aarch64_irq:
-    TASK_EXIT 1 2                  
+    TASK_EXIT {kind_irq}                  
 lower_el_aarch64_fiq:
     INVALID_EXCP 2 2                
 lower_el_aarch64_serror:

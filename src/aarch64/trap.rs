@@ -6,13 +6,15 @@ use crate::trap::PageFaultFlags;
 
 core::arch::global_asm!(
     include_str!("trap.S"),
-    trapframe_size = const core::mem::size_of::<TrapFrame>()
+    trapframe_size = const core::mem::size_of::<TrapFrame>(),
+    kind_irq = const TrapKind::Irq as u8,
+    kind_sync = const TrapKind::Synchronous as u8,
 );
 
 #[repr(u8)]
 #[derive(Debug)]
 #[allow(dead_code)]
-enum TrapKind {
+pub(crate) enum TrapKind {
     Synchronous = 0,
     Irq = 1,
     Fiq = 2,

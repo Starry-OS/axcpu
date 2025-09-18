@@ -2,7 +2,7 @@
 
 use memory_addr::VirtAddr;
 
-use crate::TrapFrame;
+use crate::{TrapFrame, aarch64::trap::TrapKind};
 
 /// Context to enter user space.
 pub struct UspaceContext(TrapFrame);
@@ -218,10 +218,8 @@ impl UserContext {
             "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x} ",
             self.tf.elr, self.sp_el1, self.tf.usp,
         );
-        unsafe {
-            enter_user(self);
-        }
-        debug!("Returned from user space");
+        let tp_kind = unsafe { _enter_user(self) };
+        debug!("Returned from user space with TrapKind: {:?}", tp_kind);
         let esr = ESR_EL1.extract();
         let iss = esr.read(ESR_EL1::ISS);
 
@@ -262,7 +260,7 @@ impl UserContext {
 }
 
 #[unsafe(naked)]
-unsafe extern "C" fn enter_user(_ctx: &mut UserContext) {
+unsafe extern "C" fn _enter_user(_ctx: &mut UserContext) -> TrapKind {
     naked_asm!(
         "
         // -- save kernel context --
