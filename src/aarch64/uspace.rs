@@ -6,21 +6,22 @@ use core::{
 };
 
 use aarch64_cpu::registers::ESR_EL1;
+
 use memory_addr::VirtAddr;
 
 use crate::{
+    trap::{ExceptionKind, ReturnReason},
     TrapFrame,
     aarch64::trap::TrapKind,
-    trap::{ExceptionKind, ReturnReason},
 };
 
 /// Context to enter user space.
-pub struct UspaceContext(TrapFrame);
+pub struct UserContext(TrapFrame);
 
-impl UspaceContext {
+impl UserContext {
     /// Creates an empty context with all registers set to zero.
     pub const fn empty() -> Self {
-        unsafe { core::mem::MaybeUninit::zeroed().assume_init() }
+        Self(TrapFrame::new())
     }
 
     /// Creates a new context with the given entry point, user stack pointer,
@@ -49,7 +50,7 @@ impl UspaceContext {
     }
 }
 
-impl core::ops::Deref for UspaceContext {
+impl Deref for UserContext {
     type Target = TrapFrame;
 
     fn deref(&self) -> &Self::Target {
@@ -57,7 +58,7 @@ impl core::ops::Deref for UspaceContext {
     }
 }
 
-impl core::ops::DerefMut for UspaceContext {
+impl DerefMut for UserContext {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

@@ -84,22 +84,20 @@
 .Ldeadloop:
     b .Ldeadloop 
 
-.macro HANDLE_SYNC, source
+.macro HANDLE_SYNC
 .p2align 7
     sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
-    mov     x1, \source
     bl      handle_sync_exception
     b       .Lexception_return
 .endm
 
-.macro HANDLE_IRQ, source
+.macro HANDLE_IRQ
 .p2align 7
     sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
-    mov     x1, \source
     bl      handle_irq_exception
     b       .Lexception_return
 .endm
@@ -117,9 +115,9 @@ curr_el_sp0_fiq:
 curr_el_sp0_serror:
     INVALID_EXCP 3 0               
 curr_el_spx_sync:
-    HANDLE_SYNC 1                   
+    HANDLE_SYNC                    
 curr_el_spx_irq:
-    HANDLE_IRQ  1               
+    HANDLE_IRQ                 
 curr_el_spx_fiq:
     INVALID_EXCP 2 1               
 curr_el_spx_serror:
