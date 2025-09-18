@@ -1,9 +1,18 @@
 //! Structures and functions for user space.
+use core::{
+    arch::naked_asm,
+    mem::offset_of,
+    ops::{Deref, DerefMut},
+};
 
 use aarch64_cpu::registers::ESR_EL1;
 use memory_addr::VirtAddr;
 
-use crate::{TrapFrame, aarch64::trap::TrapKind};
+use crate::{
+    TrapFrame,
+    aarch64::trap::TrapKind,
+    trap::{ExceptionKind, ReturnReason},
+};
 
 /// Context to enter user space.
 pub struct UspaceContext(TrapFrame);
@@ -53,14 +62,6 @@ impl core::ops::DerefMut for UspaceContext {
         &mut self.0
     }
 }
-
-use core::{
-    arch::naked_asm,
-    mem::offset_of,
-    ops::{Deref, DerefMut},
-};
-
-use crate::trap::{ExceptionKind, ReturnReason};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionInfo {
@@ -174,52 +175,10 @@ fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnRea
     }
 }
 
-/// Compare two memory regions as u64 words, dump both if any difference found.
-///
-/// # Safety
-/// Caller must ensure both addr1 and addr2 are valid for `num_words * 8` bytes.
-pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize) -> bool {
-    let ptr1 = addr1 as *const u64;
-    let ptr2 = addr2 as *const u64;
-
-    let mut equal = true;
-
-    for i in 0..num_words {
-        let val1 = *ptr1.add(i);
-        let val2 = *ptr2.add(i);
-        if val1 != val2 {
-            equal = false;
-            break;
-        }
-    }
-
-    if !equal {
-        warn!("Memory regions differ, dumping contents:");
-
-        warn!("Region 1 at {:#x}:", addr1);
-        for i in 0..num_words {
-            let val = *ptr1.add(i);
-            warn!("  [{:02}] = {:#018x}", i, val);
-        }
-
-        warn!("Region 2 at {:#x}:", addr2);
-        for i in 0..num_words {
-            let val = *ptr2.add(i);
-            warn!("  [{:02}] = {:#018x}", i, val);
-        }
-    }
-
-    equal
-}
-
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
-        debug!(
-            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x} ",
-            self.tf.elr, self.sp_el1, self.tf.usp,
-        );
         let tp_kind = unsafe { _enter_user(self) };
-        debug!("Returned from user space with TrapKind: {:?}", tp_kind);
+        trace!("Returned from user space with TrapKind: {:?}", tp_kind);
 
         if matches!(tp_kind, TrapKind::Irq) {
             handle_trap!(IRQ, 0);
@@ -230,14 +189,12 @@ impl UserContext {
         let iss = esr.read(ESR_EL1::ISS);
 
         match esr.read_as_enum(ESR_EL1::EC) {
-            Some(ESR_EL1::EC::Value::SVC64) => {
-                // info!("task return because syscall ...");
-                ReturnReason::Syscall
-            }
+            Some(ESR_EL1::EC::Value::SVC64) => ReturnReason::Syscall,
             Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
                 handle_instruction_abort_lower(&self.tf, iss, true)
             }
             Some(ESR_EL1::EC::Value::BreakpointLowerEL)
+            | Some(ESR_EL1::EC::Value::IllegalExecutionState)
             | Some(ESR_EL1::EC::Value::PCAlignmentFault)
             | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
                 ReturnReason::Exception(ExceptionInfo {
