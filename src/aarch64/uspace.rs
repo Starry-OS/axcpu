@@ -1,5 +1,6 @@
 //! Structures and functions for user space.
 
+use aarch64_cpu::registers::ESR_EL1;
 use memory_addr::VirtAddr;
 
 use crate::{TrapFrame, aarch64::trap::TrapKind};
@@ -63,22 +64,21 @@ use crate::trap::{ExceptionKind, ReturnReason};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionInfo {
-    // pub e: E,
+    pub esr: u64,
     pub stval: usize,
 }
 
 impl ExceptionInfo {
     pub fn kind(&self) -> ExceptionKind {
-        // match self.e {
-        //     E::Breakpoint => ExceptionKind::Breakpoint,
-        //     E::IllegalInstruction => ExceptionKind::IllegalInstruction,
-        //     E::InstructionMisaligned | E::LoadMisaligned | E::StoreMisaligned => {
-        //         ExceptionKind::Misaligned
-        //     }
-        //     _ => ExceptionKind::Other,
-        // }
-
-        ExceptionKind::Other
+        let esr: tock_registers::LocalRegisterCopy<u64, ESR_EL1::Register> =
+            tock_registers::LocalRegisterCopy::new(self.esr);
+        match esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::BreakpointLowerEL) => ExceptionKind::Breakpoint,
+            Some(ESR_EL1::EC::Value::IllegalExecutionState) => ExceptionKind::IllegalInstruction,
+            Some(ESR_EL1::EC::Value::PCAlignmentFault)
+            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => ExceptionKind::Misaligned,
+            _ => ExceptionKind::Other,
+        }
     }
 }
 
@@ -112,7 +112,7 @@ impl From<TrapFrame> for UserContext {
     }
 }
 
-use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
+use aarch64_cpu::registers::{FAR_EL1, Readable};
 use page_table_entry::MappingFlags;
 
 fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
@@ -231,12 +231,19 @@ impl UserContext {
 
         match esr.read_as_enum(ESR_EL1::EC) {
             Some(ESR_EL1::EC::Value::SVC64) => {
-                info!("task return because syscall ...");
+                // info!("task return because syscall ...");
                 ReturnReason::Syscall
             }
             Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
-                info!("task return because InstrAbortLowerEL ...");
                 handle_instruction_abort_lower(&self.tf, iss, true)
+            }
+            Some(ESR_EL1::EC::Value::BreakpointLowerEL)
+            | Some(ESR_EL1::EC::Value::PCAlignmentFault)
+            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
+                ReturnReason::Exception(ExceptionInfo {
+                    esr: esr.get(),
+                    stval: FAR_EL1.get() as usize,
+                })
             }
             Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
                 info!("task return because DataAbortLowerEL ...");

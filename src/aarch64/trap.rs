@@ -16,9 +16,9 @@ core::arch::global_asm!(
 #[allow(dead_code)]
 pub(crate) enum TrapKind {
     Synchronous = 0,
-    Irq = 1,
-    Fiq = 2,
-    SError = 3,
+    Irq         = 1,
+    Fiq         = 2,
+    SError      = 3,
 }
 
 #[repr(u8)]
@@ -56,14 +56,10 @@ fn handle_irq_exception(_tf: &mut TrapFrame, _source: TrapSource) {
 fn handle_sync_exception(tf: &mut TrapFrame, _source: TrapSource) {
     let esr = ESR_EL1.extract();
     let iss = esr.read(ESR_EL1::ISS);
-    warn!("handle trap in current el!");
     // crate::trap::pre_trap_callback(tf, source.is_from_user());
     match esr.read_as_enum(ESR_EL1::EC) {
         #[cfg(feature = "uspace")]
-        Some(ESR_EL1::EC::Value::SVC64) => {
-            // Do Not handle syscall here 
-            // tf.r[0] = crate::trap::handle_syscall(tf, tf.r[8] as usize) as u64;
-        }
+        Some(ESR_EL1::EC::Value::SVC64) => {}
         Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => handle_instruction_abort(tf, iss, true),
         Some(ESR_EL1::EC::Value::InstrAbortCurrentEL) => handle_instruction_abort(tf, iss, false),
         Some(ESR_EL1::EC::Value::DataAbortLowerEL) => handle_data_abort(tf, iss, true),
@@ -86,7 +82,6 @@ fn handle_sync_exception(tf: &mut TrapFrame, _source: TrapSource) {
     // crate::trap::post_trap_callback(tf, source.is_from_user());
 }
 
-
 pub(crate) fn handle_instruction_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
     let mut access_flags = PageFaultFlags::EXECUTE;
     if is_user {
@@ -99,7 +94,8 @@ pub(crate) fn handle_instruction_abort(tf: &TrapFrame, iss: u64, is_user: bool) 
         || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
     {
         panic!(
-            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            "Unhandled {} Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} \
+             ({:?}):\n{:#x?}\n{}",
             if is_user { "EL0" } else { "EL1" },
             tf.elr,
             vaddr,
@@ -140,4 +136,3 @@ fn handle_data_abort(tf: &TrapFrame, iss: u64, is_user: bool) {
         );
     }
 }
-

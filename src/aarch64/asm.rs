@@ -64,7 +64,8 @@ pub fn read_kernel_page_table() -> PhysAddr {
 /// Reads the current page table root register for user space (`TTBR0_EL1`).
 ///
 /// When the "arm-el2" feature is enabled, for user-mode programs,
-/// virtualization is completely transparent to them, so there is no need to modify
+/// virtualization is completely transparent to them, so there is no need to
+/// modify
 ///
 /// Returns the physical address of the page table root.
 #[inline]
@@ -88,13 +89,15 @@ pub fn read_user_page_table() -> PhysAddr {
 pub unsafe fn write_kernel_page_table(root_paddr: PhysAddr) {
     #[cfg(not(feature = "arm-el2"))]
     {
-        // kernel space page table use TTBR1 (0xffff_0000_0000_0000..0xffff_ffff_ffff_ffff)
+        // kernel space page table use TTBR1
+        // (0xffff_0000_0000_0000..0xffff_ffff_ffff_ffff)
         TTBR1_EL1.set(root_paddr.as_usize() as _);
     }
 
     #[cfg(feature = "arm-el2")]
     {
-        // kernel space page table at EL2 use TTBR0_EL2 (0x0000_0000_0000_0000..0x0000_ffff_ffff_ffff)
+        // kernel space page table at EL2 use TTBR0_EL2
+        // (0x0000_0000_0000_0000..0x0000_ffff_ffff_ffff)
         TTBR0_EL2.set(root_paddr.as_usize() as _);
     }
 }
@@ -102,7 +105,8 @@ pub unsafe fn write_kernel_page_table(root_paddr: PhysAddr) {
 /// Writes the register to update the current page table root for user space
 /// (`TTBR1_EL0`).
 /// When the "arm-el2" feature is enabled, for user-mode programs,
-/// virtualization is completely transparent to them, so there is no need to modify
+/// virtualization is completely transparent to them, so there is no need to
+/// modify
 ///
 /// Note that the TLB is **NOT** flushed after this operation.
 ///
@@ -202,9 +206,18 @@ pub fn enable_fp() {
     barrier::isb(barrier::SY);
 }
 
-pub fn user_copy(_dst: *mut u8, _src: *const u8, _size: usize) -> usize {
-    info!(
-        "Copy user data!"
-    );
-    0
+core::arch::global_asm!(include_str!("user_copy.S"));
+
+extern "C" {
+    /// Copy data from user space to kernel space safely.
+    ///
+    /// # Arguments
+    /// * `dst` - Destination pointer in kernel space
+    /// * `src` - Source pointer in user space
+    /// * `size` - Number of bytes to copy
+    ///
+    /// # Returns
+    /// * `0` - Success, all bytes copied
+    /// * `>0` - Number of bytes that could not be copied due to page fault
+    pub fn user_copy(dst: *mut u8, src: *const u8, size: usize) -> usize;
 }
