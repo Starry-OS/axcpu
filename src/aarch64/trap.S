@@ -36,7 +36,7 @@
     # backup kernel tpidr_el0
     mrs     x1, tpidr_el0
     msr     tpidrro_el0, x1
-    
+
     ldp     x11, x12, [sp, 33 * 8]
     ldp     x9, x10, [sp, 31 * 8]
     msr     sp_el0, x9
@@ -75,14 +75,8 @@
 
 .macro TASK_EXIT, kind, source
 .p2align 7
-
-    ldp     x19, x20, [sp]
-    ldp     x21, x22, [sp, 2 * 8]
-    ldp     x23, x24, [sp, 4 * 8]
-    ldp     x25, x26, [sp, 6 * 8]
-    ldp     x27, x28, [sp, 8 * 8]
-    ldp     x29, x30, [sp, 10 * 8]
-    ret
+    SAVE_REGS
+    b _user_trap_entry
 
 .endm
 

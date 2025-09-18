@@ -2,7 +2,7 @@
 
 use memory_addr::VirtAddr;
 
-use crate::{TrapFrame, aarch64::trap};
+use crate::TrapFrame;
 
 /// Context to enter user space.
 pub struct UspaceContext(TrapFrame);
@@ -37,61 +37,6 @@ impl UspaceContext {
     pub const fn from(trap_frame: &TrapFrame) -> Self {
         Self(*trap_frame)
     }
-
-    /// Enters user space.
-    ///
-    /// It restores the user registers and jumps to the user entry point
-    /// (saved in `elr`).
-    /// When an exception or syscall occurs, the kernel stack pointer is
-    /// switched to `kstack_top`.
-    ///
-    /// # Safety
-    ///
-    /// This function is unsafe because it changes processor mode and the stack.
-    pub unsafe fn enter_uspace(&self, kstack_top: VirtAddr) -> ! {
-        crate::asm::disable_irqs();
-        // We do not handle traps that occur at the current exception level,
-        // so the kstack ptr(`sp_el1`) will not change during running in user space.
-        // Then we don't need to save the `sp_el1` to the taskctx.
-        unsafe {
-            core::arch::asm!(
-                "
-                mov     sp, x1
-                
-                // backup kernel tpidr_el0
-                mrs     x1, tpidr_el0
-                msr     tpidrro_el0, x1
-                
-                ldp     x11, x12, [x0, 33 * 8]
-                ldp     x9, x10, [x0, 31 * 8]
-                msr     sp_el0, x9
-                msr     tpidr_el0, x10
-                msr     elr_el1, x11
-                msr     spsr_el1, x12
-
-                ldr     x30, [x0, 30 * 8]
-                ldp     x28, x29, [x0, 28 * 8]
-                ldp     x26, x27, [x0, 26 * 8]
-                ldp     x24, x25, [x0, 24 * 8]
-                ldp     x22, x23, [x0, 22 * 8]
-                ldp     x20, x21, [x0, 20 * 8]
-                ldp     x18, x19, [x0, 18 * 8]
-                ldp     x16, x17, [x0, 16 * 8]
-                ldp     x14, x15, [x0, 14 * 8]
-                ldp     x12, x13, [x0, 12 * 8]
-                ldp     x10, x11, [x0, 10 * 8]
-                ldp     x8, x9, [x0, 8 * 8]
-                ldp     x6, x7, [x0, 6 * 8]
-                ldp     x4, x5, [x0, 4 * 8]
-                ldp     x2, x3, [x0, 2 * 8]
-                ldp     x0, x1, [x0]
-                eret",
-                in("x0") &self.0,
-                in("x1") kstack_top.as_usize() ,
-                options(noreturn),
-            )
-        }
-    }
 }
 
 impl core::ops::Deref for UspaceContext {
@@ -112,7 +57,6 @@ use core::{
     arch::naked_asm,
     mem::offset_of,
     ops::{Deref, DerefMut},
-    ptr::addr_of,
 };
 
 use crate::trap::{ExceptionKind, ReturnReason};
@@ -271,11 +215,8 @@ pub unsafe fn compare_and_dump_u64(addr1: usize, addr2: usize, num_words: usize)
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
         debug!(
-            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x}, el{}",
-            self.tf.elr,
-            self.sp_el1,
-            self.tf.usp,
-            CurrentEL.read(CurrentEL::EL)
+            "UserContext::run: elr={:#x}, sp_el1={:#x}, usp={:#x} ",
+            self.tf.elr, self.sp_el1, self.tf.usp,
         );
         unsafe {
             enter_user(self);
@@ -312,8 +253,8 @@ impl UserContext {
                 r: [0u64; 31],
                 usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
                 tpidr: 0,
-                elr: entry as u64,       // 用户入口地址
-                spsr: 0 | (0b0000 << 4), // 可根据 EL 设置初值   // 0001 0000 1100 0111 0000
+                elr: entry as u64, // 用户入口地址
+                spsr: 0,           // 默认初始化为 0
             },
             sp_el1: 0, // EL1 栈指针
         }
@@ -324,52 +265,72 @@ impl UserContext {
 unsafe extern "C" fn enter_user(_ctx: &mut UserContext) {
     naked_asm!(
         "
-        sub     sp,   sp, 12 * 8
-        stp     x29, x30, [sp,10 * 8]
+        // -- save kernel context --
+        sub     sp, sp, 12 * 8
+        stp     x29, x30, [sp, 10 * 8]
         stp     x27, x28, [sp, 8 * 8]
         stp     x25, x26, [sp, 6 * 8]
         stp     x23, x24, [sp, 4 * 8]
         stp     x21, x22, [sp, 2 * 8]
-        stp     x19, x20, [sp, 2 * 0]
+        stp     x19, x20, [sp]
 
         mov     x8,  sp
-        msr     sp_el1, x8
-
-        str     x8, [x0, {sp_el1}] 
+        str     x8,  [x0, {sp_el1}]  // save sp_el1 to ctx.sp_el1
 
         // -- restore user context --
-        
+        mov     sp,   x0
+
         mrs     x8, tpidr_el0
         msr     tpidrro_el0, x8
 
-        ldp     x8,  x9,   [x0, {elr_el1}] 
+        ldp     x8,  x9,   [sp, {elr_el1}] 
         msr     elr_el1,   x8
         msr     spsr_el1,  x9
 
-        ldp     x8,  x9,   [x0, {sp_el0}] 
+        ldp     x8,  x9,   [sp, {sp_el0}] 
         msr     sp_el0,    x8
         msr     tpidr_el0, x9
 
-        ldr     x30,        [x0, 30 * 8]
-        ldp     x28, x29, [x0, 28 * 8]
-        ldp     x26, x27, [x0, 26 * 8]
-        ldp     x24, x25, [x0, 24 * 8]
-        ldp     x22, x23, [x0, 22 * 8]
-        ldp     x20, x21, [x0, 20 * 8]
-        ldp     x18, x19, [x0, 18 * 8]
-        ldp     x16, x17, [x0, 16 * 8]
-        ldp     x14, x15, [x0, 14 * 8]
-        ldp     x12, x13, [x0, 12 * 8]
-        ldp     x10, x11, [x0, 10 * 8]
-        ldp     x8, x9,   [x0, 8 * 8]
-        ldp     x6, x7,   [x0, 6 * 8]
-        ldp     x4, x5,   [x0, 4 * 8]
-        ldp     x2, x3,   [x0, 2 * 8]
-        ldp     x0, x1,   [x0]
+        ldr     x30,      [sp, 30 * 8]
+        ldp     x28, x29, [sp, 28 * 8]
+        ldp     x26, x27, [sp, 26 * 8]
+        ldp     x24, x25, [sp, 24 * 8]
+        ldp     x22, x23, [sp, 22 * 8]
+        ldp     x20, x21, [sp, 20 * 8]
+        ldp     x18, x19, [sp, 18 * 8]
+        ldp     x16, x17, [sp, 16 * 8]
+        ldp     x14, x15, [sp, 14 * 8]
+        ldp     x12, x13, [sp, 12 * 8]
+        ldp     x10, x11, [sp, 10 * 8]
+        ldp     x8, x9,   [sp, 8 * 8]
+        ldp     x6, x7,   [sp, 6 * 8]
+        ldp     x4, x5,   [sp, 4 * 8]
+        ldp     x2, x3,   [sp, 2 * 8]
+        ldp     x0, x1,   [sp]
         eret
         ",
         sp_el1 = const offset_of!(UserContext, sp_el1),
         elr_el1 = const offset_of!(TrapFrame, elr),
         sp_el0 = const offset_of!(TrapFrame, usp),
+    )
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(naked)]
+pub unsafe extern "C" fn _user_trap_entry() -> ! {
+    naked_asm!(
+        "
+        ldr     x8, [sp, {sp_el1}]  // load ctx.sp_el1 to x8
+        mov     sp, x8
+        ldp     x19, x20, [sp]
+        ldp     x21, x22, [sp, 2 * 8]
+        ldp     x23, x24, [sp, 4 * 8]
+        ldp     x25, x26, [sp, 6 * 8]
+        ldp     x27, x28, [sp, 8 * 8]
+        ldp     x29, x30, [sp, 10 * 8]
+        add     sp, sp, 12 * 8
+        ret
+    ",
+        sp_el1 = const offset_of!(UserContext, sp_el1),
     )
 }
