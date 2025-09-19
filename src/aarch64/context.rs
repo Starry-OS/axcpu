@@ -1,5 +1,5 @@
-use core::arch::naked_asm;
-use core::fmt;
+use core::{arch::naked_asm, fmt};
+
 use memory_addr::VirtAddr;
 
 /// Saved registers when a trap (exception) occurs.
@@ -129,6 +129,11 @@ impl TrapFrame {
         self.r[8] as usize
     }
 
+    /// Sets the syscall number.
+    pub const fn set_sysno(&mut self, sysno: usize) {
+        self.r[8] = sysno as _;
+    }
+
     /// Sets the return value register.
     pub const fn set_retval(&mut self, r0: usize) {
         self.r[0] = r0 as _;
@@ -240,8 +245,9 @@ impl TaskContext {
 
     /// Changes the page table root in this context.
     ///
-    /// The hardware register for user page table root (`ttbr0_el1` for aarch64 in EL1)
-    /// will be updated to the next task's after [`Self::switch_to`].
+    /// The hardware register for user page table root (`ttbr0_el1` for aarch64
+    /// in EL1) will be updated to the next task's after
+    /// [`Self::switch_to`].
     #[cfg(feature = "uspace")]
     pub fn set_page_table_root(&mut self, ttbr0_el1: memory_addr::PhysAddr) {
         self.ttbr0_el1 = ttbr0_el1;
@@ -249,8 +255,8 @@ impl TaskContext {
 
     /// Switches to another task.
     ///
-    /// It first saves the current task's context from CPU to this place, and then
-    /// restores the next task's context from `next_ctx` to CPU.
+    /// It first saves the current task's context from CPU to this place, and
+    /// then restores the next task's context from `next_ctx` to CPU.
     pub fn switch_to(&mut self, next_ctx: &Self) {
         #[cfg(feature = "tls")]
         {

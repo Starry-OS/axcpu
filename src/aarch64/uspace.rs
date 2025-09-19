@@ -8,6 +8,7 @@ use core::{
 use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
 use memory_addr::VirtAddr;
 use page_table_entry::MappingFlags;
+use tock_registers::LocalRegisterCopy;
 
 use crate::{
     TrapFrame,
@@ -17,15 +18,13 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub struct ExceptionInfo {
-    pub esr: u64,
+    pub esr: LocalRegisterCopy<u64, ESR_EL1::Register>,
     pub stval: usize,
 }
 
 impl ExceptionInfo {
     pub fn kind(&self) -> ExceptionKind {
-        let esr: tock_registers::LocalRegisterCopy<u64, ESR_EL1::Register> =
-            tock_registers::LocalRegisterCopy::new(self.esr);
-        match esr.read_as_enum(ESR_EL1::EC) {
+        match self.esr.read_as_enum(ESR_EL1::EC) {
             Some(ESR_EL1::EC::Value::BreakpointLowerEL) => ExceptionKind::Breakpoint,
             Some(ESR_EL1::EC::Value::IllegalExecutionState) => ExceptionKind::IllegalInstruction,
             Some(ESR_EL1::EC::Value::PCAlignmentFault)
@@ -45,7 +44,6 @@ pub struct UserContext {
 impl UserContext {
     pub fn run(&mut self) -> ReturnReason {
         let tp_kind = unsafe { _enter_user(self) };
-        trace!("Returned from user space with TrapKind: {:?}", tp_kind);
 
         if matches!(tp_kind, TrapKind::Irq) {
             handle_trap!(IRQ, 0);
@@ -65,7 +63,7 @@ impl UserContext {
             | Some(ESR_EL1::EC::Value::PCAlignmentFault)
             | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
                 ReturnReason::Exception(ExceptionInfo {
-                    esr: esr.get(),
+                    esr,
                     stval: FAR_EL1.get() as usize,
                 })
             }
