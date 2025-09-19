@@ -5,8 +5,9 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-use aarch64_cpu::registers::ESR_EL1;
+use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
 use memory_addr::VirtAddr;
+use page_table_entry::MappingFlags;
 
 use crate::{
     TrapFrame,
@@ -41,6 +42,62 @@ pub struct UserContext {
     sp_el1: u64,
 }
 
+impl UserContext {
+    pub fn run(&mut self) -> ReturnReason {
+        let tp_kind = unsafe { _enter_user(self) };
+        trace!("Returned from user space with TrapKind: {:?}", tp_kind);
+
+        if matches!(tp_kind, TrapKind::Irq) {
+            handle_trap!(IRQ, 0);
+            return ReturnReason::Interrupt;
+        }
+
+        let esr = ESR_EL1.extract();
+        let iss = esr.read(ESR_EL1::ISS);
+
+        match esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::SVC64) => ReturnReason::Syscall,
+            Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
+                handle_instruction_abort_lower(&self.tf, iss, true)
+            }
+            Some(ESR_EL1::EC::Value::BreakpointLowerEL)
+            | Some(ESR_EL1::EC::Value::IllegalExecutionState)
+            | Some(ESR_EL1::EC::Value::PCAlignmentFault)
+            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
+                ReturnReason::Exception(ExceptionInfo {
+                    esr: esr.get(),
+                    stval: FAR_EL1.get() as usize,
+                })
+            }
+            Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
+                info!("task return because DataAbortLowerEL ...");
+                handle_data_abort_lower(&self.tf, iss, true)
+            }
+            _ => ReturnReason::Unknown,
+        }
+    }
+
+    pub fn new(entry: usize, ustack_top: VirtAddr, arg0: usize) -> Self {
+        info!(
+            "new ctx: entry={:#x}, ustack_top={:#x}",
+            entry,
+            ustack_top.as_usize()
+        );
+        let mut r = [0u64; 31];
+        r[0] = arg0 as u64;
+        Self {
+            tf: TrapFrame {
+                r,
+                usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
+                tpidr: 0,
+                elr: entry as u64,
+                spsr: 0, // recommend to set to 0
+            },
+            sp_el1: 0, // stack pointer for EL1, will be set in _enter_user
+        }
+    }
+}
+
 impl Deref for UserContext {
     type Target = TrapFrame;
 
@@ -63,9 +120,6 @@ impl From<TrapFrame> for UserContext {
         }
     }
 }
-
-use aarch64_cpu::registers::{FAR_EL1, Readable};
-use page_table_entry::MappingFlags;
 
 fn handle_instruction_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnReason {
     let mut access_flags = MappingFlags::EXECUTE;
@@ -123,60 +177,6 @@ fn handle_data_abort_lower(tf: &TrapFrame, iss: u64, is_user: bool) -> ReturnRea
         );
     } else {
         ReturnReason::PageFault(vaddr, access_flags)
-    }
-}
-
-impl UserContext {
-    pub fn run(&mut self) -> ReturnReason {
-        let tp_kind = unsafe { _enter_user(self) };
-        trace!("Returned from user space with TrapKind: {:?}", tp_kind);
-
-        if matches!(tp_kind, TrapKind::Irq) {
-            handle_trap!(IRQ, 0);
-            return ReturnReason::Interrupt;
-        }
-
-        let esr = ESR_EL1.extract();
-        let iss = esr.read(ESR_EL1::ISS);
-
-        match esr.read_as_enum(ESR_EL1::EC) {
-            Some(ESR_EL1::EC::Value::SVC64) => ReturnReason::Syscall,
-            Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => {
-                handle_instruction_abort_lower(&self.tf, iss, true)
-            }
-            Some(ESR_EL1::EC::Value::BreakpointLowerEL)
-            | Some(ESR_EL1::EC::Value::IllegalExecutionState)
-            | Some(ESR_EL1::EC::Value::PCAlignmentFault)
-            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
-                ReturnReason::Exception(ExceptionInfo {
-                    esr: esr.get(),
-                    stval: FAR_EL1.get() as usize,
-                })
-            }
-            Some(ESR_EL1::EC::Value::DataAbortLowerEL) => {
-                info!("task return because DataAbortLowerEL ...");
-                handle_data_abort_lower(&self.tf, iss, true)
-            }
-            _ => ReturnReason::Unknown,
-        }
-    }
-
-    pub fn new(entry: usize, ustack_top: VirtAddr, _arg0: usize) -> Self {
-        info!(
-            "new ctx: entry={:#x}, ustack_top={:#x}",
-            entry,
-            ustack_top.as_usize()
-        );
-        Self {
-            tf: TrapFrame {
-                r: [0u64; 31],
-                usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
-                tpidr: 0,
-                elr: entry as u64, // 用户入口地址
-                spsr: 0,           // 默认初始化为 0
-            },
-            sp_el1: 0, // EL1 栈指针
-        }
     }
 }
 
