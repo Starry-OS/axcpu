@@ -124,7 +124,7 @@ impl TrapFrame {
         self.r[0] as _
     }
 
-    // TODO:
+    /// Get the syscall number.
     pub const fn sysno(&self) -> usize {
         self.r[8] as usize
     }
