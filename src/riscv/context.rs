@@ -1,4 +1,5 @@
 use core::arch::naked_asm;
+
 use memory_addr::VirtAddr;
 use riscv::register::sstatus::{self, FS};
 
@@ -85,7 +86,8 @@ impl FpState {
 
     /// Handles floating-point state context switching
     ///
-    /// Saves the current task's FP state (if needed) and restores the next task's FP state
+    /// Saves the current task's FP state (if needed) and restores the next
+    /// task's FP state
     pub fn switch_to(&mut self, next_fp_state: &FpState) {
         // get the real FP state of the current task
         let current_fs = sstatus::read().fs();
@@ -98,9 +100,12 @@ impl FpState {
         }
         // restore the next task's FP state
         match next_fp_state.fs {
-            FS::Clean => next_fp_state.restore(), // the next task's FP state is clean, we should restore it
-            FS::Initial => FpState::clear(),      // restore the FP state as constant values(all 0)
-            FS::Off => {}                         // do nothing
+            // the next task's FP state is clean, we should restore it
+            FS::Clean => next_fp_state.restore(),
+            // restore the FP state as constant values(all 0)
+            FS::Initial => FpState::clear(),
+            // do nothing
+            FS::Off => {}
             FS::Dirty => unreachable!("FP state of the next task should not be dirty"),
         }
         unsafe { sstatus::set_fs(next_fp_state.fs) }; // set the FP state to the next task's FP state
@@ -326,8 +331,8 @@ impl TaskContext {
 
     /// Switches to another task.
     ///
-    /// It first saves the current task's context from CPU to this place, and then
-    /// restores the next task's context from `next_ctx` to CPU.
+    /// It first saves the current task's context from CPU to this place, and
+    /// then restores the next task's context from `next_ctx` to CPU.
     pub fn switch_to(&mut self, next_ctx: &Self) {
         #[cfg(feature = "tls")]
         {
@@ -424,4 +429,84 @@ unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task:
 
         ret",
     )
+}
+
+impl TrapFrame {
+    pub fn to_pt_regs(&mut self) -> axprobe::PtRegs {
+        axprobe::PtRegs {
+            epc: self.sepc,
+            ra: self.regs.ra,
+            sp: self.regs.sp,
+            gp: self.regs.gp,
+            tp: self.regs.tp,
+            t0: self.regs.t0,
+            t1: self.regs.t1,
+            t2: self.regs.t2,
+            s0: self.regs.s0,
+            s1: self.regs.s1,
+            a0: self.regs.a0,
+            a1: self.regs.a1,
+            a2: self.regs.a2,
+            a3: self.regs.a3,
+            a4: self.regs.a4,
+            a5: self.regs.a5,
+            a6: self.regs.a6,
+            a7: self.regs.a7,
+            s2: self.regs.s2,
+            s3: self.regs.s3,
+            s4: self.regs.s4,
+            s5: self.regs.s5,
+            s6: self.regs.s6,
+            s7: self.regs.s7,
+            s8: self.regs.s8,
+            s9: self.regs.s9,
+            s10: self.regs.s10,
+            s11: self.regs.s11,
+            t3: self.regs.t3,
+            t4: self.regs.t4,
+            t5: self.regs.t5,
+            t6: self.regs.t6,
+            status: self.sstatus.bits(),
+            // todo : other fields
+            badaddr: 0,
+            cause: 0,
+            orig_a0: 0,
+        }
+    }
+
+    pub fn update_from_pt_regs(&mut self, pt_regs: axprobe::PtRegs) {
+        self.sepc = pt_regs.epc;
+        self.regs.ra = pt_regs.ra;
+        self.regs.sp = pt_regs.sp;
+        self.regs.gp = pt_regs.gp;
+        self.regs.tp = pt_regs.tp;
+        self.regs.t0 = pt_regs.t0;
+        self.regs.t1 = pt_regs.t1;
+        self.regs.t2 = pt_regs.t2;
+        self.regs.s0 = pt_regs.s0;
+        self.regs.s1 = pt_regs.s1;
+        self.regs.a0 = pt_regs.a0;
+        self.regs.a1 = pt_regs.a1;
+        self.regs.a2 = pt_regs.a2;
+        self.regs.a3 = pt_regs.a3;
+        self.regs.a4 = pt_regs.a4;
+        self.regs.a5 = pt_regs.a5;
+        self.regs.a6 = pt_regs.a6;
+        self.regs.a7 = pt_regs.a7;
+        self.regs.s2 = pt_regs.s2;
+        self.regs.s3 = pt_regs.s3;
+        self.regs.s4 = pt_regs.s4;
+        self.regs.s5 = pt_regs.s5;
+        self.regs.s6 = pt_regs.s6;
+        self.regs.s7 = pt_regs.s7;
+        self.regs.s8 = pt_regs.s8;
+        self.regs.s9 = pt_regs.s9;
+        self.regs.s10 = pt_regs.s10;
+        self.regs.s11 = pt_regs.s11;
+        self.regs.t3 = pt_regs.t3;
+        self.regs.t4 = pt_regs.t4;
+        self.regs.t5 = pt_regs.t5;
+        self.regs.t6 = pt_regs.t6;
+        // todo : other fields
+    }
 }
