@@ -350,3 +350,59 @@ unsafe extern "C" fn context_switch(_current_stack: &mut u64, _next_stack: &u64)
         ret",
     )
 }
+#[cfg(feature = "kprobe")]
+impl From<&TrapFrame> for kprobe::PtRegs {
+    fn from(value: &TrapFrame) -> Self {
+        kprobe::PtRegs {
+            r15: value.r15 as _,
+            r14: value.r14 as _,
+            r13: value.r13 as _,
+            r12: value.r12 as _,
+            rbp: value.rbp as _,
+            rbx: value.rbx as _,
+            r11: value.r11 as _,
+            r10: value.r10 as _,
+            r9: value.r9 as _,
+            r8: value.r8 as _,
+            rax: value.rax as _,
+            rcx: value.rcx as _,
+            rdx: value.rdx as _,
+            rsi: value.rsi as _,
+            rdi: value.rdi as _,
+            orig_rax: value.vector as _,
+            rip: value.rip as _,
+            cs: value.cs as _,
+            rsp: value.rsp as _,
+            ss: value.ss as _,
+            rflags: value.rflags as _,
+        }
+    }
+}
+
+#[cfg(feature = "kprobe")]
+impl TrapFrame {
+    /// Update the TrapFrame from kprobe::PtRegs
+    pub fn update_from_ptregs(&mut self, ptregs: kprobe::PtRegs) {
+        self.r15 = ptregs.r15 as _;
+        self.r14 = ptregs.r14 as _;
+        self.r13 = ptregs.r13 as _;
+        self.r12 = ptregs.r12 as _;
+        self.rbp = ptregs.rbp as _;
+        self.rbx = ptregs.rbx as _;
+        self.r11 = ptregs.r11 as _;
+        self.r10 = ptregs.r10 as _;
+        self.r9 = ptregs.r9 as _;
+        self.r8 = ptregs.r8 as _;
+        self.rax = ptregs.rax as _;
+        self.rcx = ptregs.rcx as _;
+        self.rdx = ptregs.rdx as _;
+        self.rsi = ptregs.rsi as _;
+        self.rdi = ptregs.rdi as _;
+        self.vector = ptregs.orig_rax as _;
+        self.rip = ptregs.rip as _;
+        self.cs = ptregs.cs as _;
+        self.rflags = ptregs.rflags as _;
+        self.rsp = ptregs.rsp as _;
+        self.ss = ptregs.ss as _;
+    }
+}

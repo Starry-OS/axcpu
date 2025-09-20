@@ -35,6 +35,7 @@ dependencies = [
  "aarch64-cpu",
  "axbacktrace",
  "cfg-if",
+ "kprobe",
  "lazyinit",
  "linkme",
  "log",
@@ -85,6 +86,18 @@ name = "embedded-hal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
+name = "kprobe"
+version = "0.1.0"
+source = "git+https://github.com/Starry-OS/kprobe#985e06a8b66e78400dfa55d2faa3813619aa0dcf"
+dependencies = [
+ "cfg-if",
+ "lock_api",
+ "log",
+ "yaxpeax-arch",
+ "yaxpeax-x86",
+]
 
 [[package]]
 name = "lazyinit"
@@ -143,6 +156,15 @@ name = "memory_addr"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d4054cba279515fa87761b101d857333ce06391dbe8f18a11347204a7111416"
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "page_table_entry"
@@ -338,4 +360,24 @@ dependencies = [
  "bitflags 2.9.1",
  "rustversion",
  "volatile",
+]
+
+[[package]]
+name = "yaxpeax-arch"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36274fcc5403da2a7636ffda4d02eca12a1b2b8267b9d2e04447bd2ccfc72082"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "yaxpeax-x86"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a9a30b7dd533c7b1a73eaf7c4ea162a7a632a2bb29b9fff47d8f2cc8513a883"
+dependencies = [
+ "cfg-if",
+ "num-traits",
+ "yaxpeax-arch",
 ]

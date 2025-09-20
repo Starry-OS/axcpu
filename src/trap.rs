@@ -15,6 +15,14 @@ pub static IRQ: [fn(usize) -> bool];
 #[def_trap_handler]
 pub static PAGE_FAULT: [fn(VirtAddr, PageFaultFlags) -> bool];
 
+/// A slice of breakpoint handler functions.
+#[def_trap_handler]
+pub static BREAK_HANDLER: [fn(&mut TrapFrame, arg:u64) -> bool];
+
+/// A slice of debug handler functions.
+#[def_trap_handler]
+pub static DEBUG_HANDLER: [fn(&mut TrapFrame) -> bool];
+
 #[allow(unused_macros)]
 macro_rules! handle_trap {
     ($trap:ident, $($args:tt)*) => {{
