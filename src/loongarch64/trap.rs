@@ -12,9 +12,12 @@ core::arch::global_asm!(
     trapframe_size = const (core::mem::size_of::<TrapFrame>()),
 );
 
-fn handle_breakpoint(era: &mut usize) {
-    debug!("Exception(Breakpoint) @ {era:#x} ");
-    *era += 4;
+fn handle_breakpoint(tf: &mut TrapFrame) {
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
+        return;
+    }
+    debug!("Exception(Breakpoint) @ {:#x} ", tf.era);
+    tf.era += 2; // skip ebreak instruction
 }
 
 fn handle_page_fault(tf: &mut TrapFrame, access_flags: PageFaultFlags) {
@@ -51,7 +54,7 @@ fn loongarch64_trap_handler(tf: &mut TrapFrame) {
         | Trap::Exception(Exception::PageNonExecutableFault) => {
             handle_page_fault(tf, PageFaultFlags::EXECUTE);
         }
-        Trap::Exception(Exception::Breakpoint) => handle_breakpoint(&mut tf.era),
+        Trap::Exception(Exception::Breakpoint) => handle_breakpoint(tf),
         Trap::Exception(Exception::AddressNotAligned) => unsafe {
             tf.emulate_unaligned().unwrap();
         },

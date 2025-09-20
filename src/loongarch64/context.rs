@@ -1,6 +1,8 @@
 use core::arch::naked_asm;
 #[cfg(feature = "fp-simd")]
 use core::mem::offset_of;
+
+use axprobe::PtRegs;
 use memory_addr::VirtAddr;
 
 /// General registers of Loongarch64.
@@ -259,8 +261,8 @@ impl TaskContext {
 
     /// Switches to another task.
     ///
-    /// It first saves the current task's context from CPU to this place, and then
-    /// restores the next task's context from `next_ctx` to CPU.
+    /// It first saves the current task's context from CPU to this place, and
+    /// then restores the next task's context from `next_ctx` to CPU.
     pub fn switch_to(&mut self, next_ctx: &Self) {
         #[cfg(feature = "tls")]
         {
@@ -352,4 +354,41 @@ unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task:
 
         ret",
     )
+}
+
+impl TrapFrame {
+    pub fn to_pt_regs(&mut self) -> axprobe::PtRegs {
+        let regs = [0; 32];
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &self.regs.zero as *const usize,
+                regs.as_ptr() as *mut usize,
+                32,
+            );
+        }
+        PtRegs {
+            regs,
+            orig_a0: 0,
+            csr_era: self.era,
+            csr_badvaddr: 0,
+            csr_crmd: 0,
+            csr_prmd: self.prmd,
+            csr_euen: 0,
+            csr_ecfg: 0,
+            csr_estat: 0,
+        }
+    }
+
+    pub fn update_from_pt_regs(&mut self, pt_regs: axprobe::PtRegs) {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                pt_regs.regs.as_ptr() as *const usize,
+                &mut self.regs.zero as *mut usize,
+                32,
+            );
+        }
+        self.era = pt_regs.csr_era;
+        self.prmd = pt_regs.csr_prmd;
+        // other csr fields are ignored
+    }
 }
