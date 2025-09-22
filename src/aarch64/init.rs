@@ -65,7 +65,8 @@ pub unsafe fn init_mmu(root_paddr: PhysAddr) {
 
     MAIR_EL1.set(MemAttr::MAIR_VALUE);
 
-    // Enable TTBR0 and TTBR1 walks, page size = 4K, vaddr size = 48 bits, paddr size = 48 bits.
+    // Enable TTBR0 and TTBR1 walks, page size = 4K, vaddr size = 48 bits, paddr
+    // size = 48 bits.
     let tcr_flags0 = TCR_EL1::EPD0::EnableTTBR0Walks
         + TCR_EL1::TG0::KiB_4
         + TCR_EL1::SH0::Inner

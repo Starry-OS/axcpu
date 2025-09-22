@@ -102,10 +102,7 @@ impl DerefMut for UserContext {
 
 impl From<TrapFrame> for UserContext {
     fn from(tf: TrapFrame) -> Self {
-        Self {
-            tf,
-            sp_el1: 0, // 默认初始化
-        }
+        Self { tf, sp_el1: 0 }
     }
 }
 
