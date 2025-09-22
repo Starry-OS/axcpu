@@ -60,7 +60,6 @@ struct ExceptionTableEntry {
 }
 
 impl TrapFrame {
-    #[allow(unused)]
     pub(crate) fn fixup_exception(&mut self) -> bool {
         let entries = unsafe {
             core::slice::from_raw_parts(

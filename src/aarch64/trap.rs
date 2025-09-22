@@ -44,15 +44,17 @@ fn handle_irq_exception(_tf: &mut TrapFrame) {
     handle_trap!(IRQ, 0);
 }
 
-fn handle_instruction_abort(tf: &TrapFrame, iss: u64) {
+fn handle_instruction_abort(tf: &mut TrapFrame, iss: u64) {
     let access_flags = PageFaultFlags::EXECUTE;
     let vaddr = va!(FAR_EL1.get() as usize);
 
-    // TODO: fixup_exception
-    // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
+    if core::hint::likely(handle_trap!(PAGE_FAULT, vaddr, access_flags))
+        && matches!(iss & 0b111100, 0b0100 | 0b1100)
     {
+        return;
+    }
+
+    if !tf.fixup_exception() {
         panic!(
             "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} \
              ({:?}):\n{:#x?}\n{}",
