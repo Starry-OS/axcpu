@@ -13,11 +13,11 @@ core::arch::global_asm!(
 );
 
 fn handle_breakpoint(tf: &mut TrapFrame) {
+    debug!("Exception(Breakpoint) @ {:#x} ", tf.era);
     if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
         return;
     }
-    debug!("Exception(Breakpoint) @ {:#x} ", tf.era);
-    tf.era += 2; // skip ebreak instruction
+    tf.era += 4;
 }
 
 fn handle_page_fault(tf: &mut TrapFrame, access_flags: PageFaultFlags) {

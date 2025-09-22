@@ -34,8 +34,8 @@ version = "0.2.2"
 dependencies = [
  "aarch64-cpu",
  "axbacktrace",
- "axprobe",
  "cfg-if",
+ "kprobe",
  "lazyinit",
  "linkme",
  "log",
@@ -49,17 +49,6 @@ dependencies = [
  "tock-registers",
  "x86",
  "x86_64",
-]
-
-[[package]]
-name = "axprobe"
-version = "0.1.0"
-source = "git+https://github.com/Starry-OS/axprobe#772e2e164e896e2d27759204d3c790aa36a7c2c3"
-dependencies = [
- "lock_api",
- "log",
- "yaxpeax-arch",
- "yaxpeax-x86",
 ]
 
 [[package]]
@@ -97,6 +86,18 @@ name = "embedded-hal"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
+name = "kprobe"
+version = "0.1.0"
+source = "git+https://github.com/Starry-OS/kprobe?rev=318cbb2#318cbb242ec8285903a909433fdf8da54554b324"
+dependencies = [
+ "cfg-if",
+ "lock_api",
+ "log",
+ "yaxpeax-arch",
+ "yaxpeax-x86",
+]
 
 [[package]]
 name = "lazyinit"
