@@ -54,7 +54,8 @@ fn handle_instruction_abort(tf: &TrapFrame, iss: u64) {
         || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
     {
         panic!(
-            "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} \
+             ({:?}):\n{:#x?}\n{}",
             tf.elr,
             vaddr,
             ESR_EL1.get(),

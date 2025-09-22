@@ -1,4 +1,5 @@
 .macro SAVE_REGS
+    sub     sp, sp, {trapframe_size}
     stp     x0, x1, [sp]
     stp     x2, x3, [sp, 2 * 8]
     stp     x4, x5, [sp, 4 * 8]
@@ -64,7 +65,6 @@
 
 .macro INVALID_EXCP, kind, source
 .p2align 7
-    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     mov     x1, \kind
@@ -81,12 +81,8 @@
 
 .endm
 
-.Ldeadloop:
-    b .Ldeadloop 
-
 .macro HANDLE_SYNC
 .p2align 7
-    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     bl      handle_sync_exception
@@ -95,12 +91,12 @@
 
 .macro HANDLE_IRQ
 .p2align 7
-    sub     sp, sp, {trapframe_size}
     SAVE_REGS
     mov     x0, sp
     bl      handle_irq_exception
     b       .Lexception_return
 .endm
+
 
 .section .text
 .p2align 11
@@ -139,6 +135,9 @@ lower_el_aarch32_fiq:
 lower_el_aarch32_serror:
     INVALID_EXCP 3 3           
 
+.section .text
+.global _user_entry
+_user_entry:
 .Lexception_return:
     RESTORE_REGS
     eret
