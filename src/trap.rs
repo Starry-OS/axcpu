@@ -2,12 +2,13 @@
 
 use core::fmt::Debug;
 
+pub use linkme::{
+    distributed_slice as def_trap_handler, distributed_slice as register_trap_handler,
+};
 use memory_addr::VirtAddr;
+pub use page_table_entry::MappingFlags as PageFaultFlags;
 
 pub use crate::TrapFrame;
-pub use linkme::distributed_slice as def_trap_handler;
-pub use linkme::distributed_slice as register_trap_handler;
-pub use page_table_entry::MappingFlags as PageFaultFlags;
 
 /// A slice of IRQ handler functions.
 #[def_trap_handler]

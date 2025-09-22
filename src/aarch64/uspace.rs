@@ -1,58 +1,88 @@
 //! Structures and functions for user space.
-
-use core::ops::{Deref, DerefMut};
-
-use aarch64_cpu::registers::ESR_EL1;
-use memory_addr::VirtAddr;
-
-use crate::{
-    trap::{ExceptionKind, ReturnReason},
-    TrapFrame,
+use core::{
+    arch::naked_asm,
+    mem::offset_of,
+    ops::{Deref, DerefMut},
 };
 
-/// Context to enter user space.
-pub struct UserContext(TrapFrame);
+use aarch64_cpu::registers::{ESR_EL1, FAR_EL1, Readable};
+use memory_addr::VirtAddr;
+use page_table_entry::MappingFlags;
+use tock_registers::LocalRegisterCopy;
+
+use crate::{
+    TrapFrame,
+    aarch64::trap::TrapKind,
+    trap::{ExceptionKind, ReturnReason},
+};
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExceptionInfo {
+    pub esr: LocalRegisterCopy<u64, ESR_EL1::Register>,
+    pub stval: usize,
+}
+
+impl ExceptionInfo {
+    pub fn kind(&self) -> ExceptionKind {
+        match self.esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::BreakpointLowerEL) => ExceptionKind::Breakpoint,
+            Some(ESR_EL1::EC::Value::IllegalExecutionState) => ExceptionKind::IllegalInstruction,
+            Some(ESR_EL1::EC::Value::PCAlignmentFault)
+            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => ExceptionKind::Misaligned,
+            _ => ExceptionKind::Other,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct UserContext {
+    tf: TrapFrame,
+    sp_el1: u64,
+}
 
 impl UserContext {
-    /// Creates an empty context with all registers set to zero.
-    pub const fn empty() -> Self {
-        Self(TrapFrame::new())
-    }
-
-    /// Creates a new context with the given entry point, user stack pointer,
-    /// and the argument.
-    pub fn new(entry: usize, ustack_top: VirtAddr, arg0: usize) -> Self {
-        use aarch64_cpu::registers::SPSR_EL1;
-        let mut regs = [0; 31];
-        regs[0] = arg0 as _;
-        Self(TrapFrame {
-            r: regs,
-            usp: ustack_top.as_usize() as _,
-            tpidr: 0,
-            elr: entry as _,
-            spsr: (SPSR_EL1::M::EL0t
-                + SPSR_EL1::D::Masked
-                + SPSR_EL1::A::Masked
-                + SPSR_EL1::I::Unmasked
-                + SPSR_EL1::F::Masked)
-                .value,
-        })
-    }
-
-    /// Creates a new context from the given [`TrapFrame`].
-    pub const fn from(trap_frame: &TrapFrame) -> Self {
-        Self(*trap_frame)
-    }
-
-    /// Enters user space.
-    ///
-    /// It restores the user registers and jumps to the user entry point
-    /// (saved in `elr`).
-    ///
-    /// This function returns when an exception or syscall occurs.
     pub fn run(&mut self) -> ReturnReason {
-        // TODO: implement
-        ReturnReason::Unknown
+        let tp_kind = unsafe { enter_user(self) };
+
+        if matches!(tp_kind, TrapKind::Irq) {
+            handle_trap!(IRQ, 0);
+            return ReturnReason::Interrupt;
+        }
+
+        let esr = ESR_EL1.extract();
+        let iss = esr.read(ESR_EL1::ISS);
+
+        match esr.read_as_enum(ESR_EL1::EC) {
+            Some(ESR_EL1::EC::Value::SVC64) => ReturnReason::Syscall,
+            Some(ESR_EL1::EC::Value::InstrAbortLowerEL) => handle_instruction_abort_lower(),
+            Some(ESR_EL1::EC::Value::BreakpointLowerEL)
+            | Some(ESR_EL1::EC::Value::IllegalExecutionState)
+            | Some(ESR_EL1::EC::Value::PCAlignmentFault)
+            | Some(ESR_EL1::EC::Value::SPAlignmentFault) => {
+                ReturnReason::Exception(ExceptionInfo {
+                    esr,
+                    stval: FAR_EL1.get() as usize,
+                })
+            }
+            Some(ESR_EL1::EC::Value::DataAbortLowerEL) => handle_data_abort_lower(iss),
+            _ => ReturnReason::Unknown,
+        }
+    }
+
+    pub fn new(entry: usize, ustack_top: VirtAddr, arg0: usize) -> Self {
+        let mut r = [0u64; 31];
+        r[0] = arg0 as u64;
+        Self {
+            tf: TrapFrame {
+                r,
+                usp: ustack_top.as_usize() as u64, // 假设 VirtAddr 有 as_u64 方法
+                tpidr: 0,
+                elr: entry as u64,
+                spsr: 0, // recommend to set to 0
+            },
+            sp_el1: 0, // stack pointer for EL1, will be set in _enter_user
+        }
     }
 }
 
@@ -60,32 +90,86 @@ impl Deref for UserContext {
     type Target = TrapFrame;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.tf
     }
 }
 
 impl DerefMut for UserContext {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.tf
     }
 }
 
 impl From<TrapFrame> for UserContext {
     fn from(tf: TrapFrame) -> Self {
-        Self(tf)
+        Self { tf, sp_el1: 0 }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ExceptionInfo {
-    pub ec: ESR_EL1::EC::Value,
-    pub il: bool,
-    pub iss: u32,
+fn handle_instruction_abort_lower() -> ReturnReason {
+    let mut access_flags = MappingFlags::EXECUTE;
+    access_flags |= MappingFlags::USER;
+    let vaddr = va!(FAR_EL1.get() as usize);
+    ReturnReason::PageFault(vaddr, access_flags)
 }
 
-impl ExceptionInfo {
-    pub fn kind(&self) -> ExceptionKind {
-        // TODO: implement
-        ExceptionKind::Other
-    }
+fn handle_data_abort_lower(iss: u64) -> ReturnReason {
+    let wnr = (iss & (1 << 6)) != 0; // WnR: Write not Read
+    let cm = (iss & (1 << 8)) != 0; // CM: Cache maintenance
+    let mut access_flags = if wnr & !cm {
+        MappingFlags::WRITE
+    } else {
+        MappingFlags::READ
+    };
+
+    access_flags |= MappingFlags::USER;
+
+    let vaddr = va!(FAR_EL1.get() as usize);
+
+    ReturnReason::PageFault(vaddr, access_flags)
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn enter_user(_ctx: &mut UserContext) -> TrapKind {
+    naked_asm!(
+        "
+        // -- save kernel context --
+        sub     sp, sp, 12 * 8
+        stp     x29, x30, [sp, 10 * 8]
+        stp     x27, x28, [sp, 8 * 8]
+        stp     x25, x26, [sp, 6 * 8]
+        stp     x23, x24, [sp, 4 * 8]
+        stp     x21, x22, [sp, 2 * 8]
+        stp     x19, x20, [sp]
+
+        mov     x8,  sp
+        str     x8,  [x0, {sp_el1}]  // save sp_el1 to ctx.sp_el1
+
+        // -- restore user context --
+        mov     sp,   x0
+        b  _user_entry
+        "
+        ,
+        sp_el1 = const offset_of!(UserContext, sp_el1),
+    )
+}
+
+#[unsafe(no_mangle)]
+#[unsafe(naked)]
+pub unsafe extern "C" fn _user_trap_entry() -> ! {
+    naked_asm!(
+        "
+        ldr     x8, [sp, {sp_el1}]  // load ctx.sp_el1 to x8
+        mov     sp, x8
+        ldp     x19, x20, [sp]
+        ldp     x21, x22, [sp, 2 * 8]
+        ldp     x23, x24, [sp, 4 * 8]
+        ldp     x25, x26, [sp, 6 * 8]
+        ldp     x27, x28, [sp, 8 * 8]
+        ldp     x29, x30, [sp, 10 * 8]
+        add     sp, sp, 12 * 8
+        ret
+    ",
+        sp_el1 = const offset_of!(UserContext, sp_el1),
+    )
 }

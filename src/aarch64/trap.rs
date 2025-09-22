@@ -6,17 +6,19 @@ use crate::trap::PageFaultFlags;
 
 core::arch::global_asm!(
     include_str!("trap.S"),
-    trapframe_size = const core::mem::size_of::<TrapFrame>()
+    trapframe_size = const core::mem::size_of::<TrapFrame>(),
+    kind_irq = const TrapKind::Irq as u8,
+    kind_sync = const TrapKind::Synchronous as u8,
 );
 
 #[repr(u8)]
 #[derive(Debug)]
 #[allow(dead_code)]
-enum TrapKind {
+pub(crate) enum TrapKind {
     Synchronous = 0,
-    Irq = 1,
-    Fiq = 2,
-    SError = 3,
+    Irq         = 1,
+    Fiq         = 2,
+    SError      = 3,
 }
 
 #[repr(u8)]
@@ -42,17 +44,20 @@ fn handle_irq_exception(_tf: &mut TrapFrame) {
     handle_trap!(IRQ, 0);
 }
 
-fn handle_instruction_abort(tf: &TrapFrame, iss: u64) {
+fn handle_instruction_abort(tf: &mut TrapFrame, iss: u64) {
     let access_flags = PageFaultFlags::EXECUTE;
     let vaddr = va!(FAR_EL1.get() as usize);
 
-    // TODO: fixup_exception
-    // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
+    if core::hint::likely(handle_trap!(PAGE_FAULT, vaddr, access_flags))
+        && matches!(iss & 0b111100, 0b0100 | 0b1100)
     {
+        return;
+    }
+
+    if !tf.fixup_exception() {
         panic!(
-            "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
+            "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} \
+             ({:?}):\n{:#x?}\n{}",
             tf.elr,
             vaddr,
             ESR_EL1.get(),
