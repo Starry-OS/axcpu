@@ -1,8 +1,6 @@
 use core::arch::naked_asm;
 #[cfg(feature = "fp-simd")]
 use core::mem::offset_of;
-
-use axprobe::PtRegs;
 use memory_addr::VirtAddr;
 
 /// General registers of Loongarch64.
@@ -356,39 +354,43 @@ unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task:
     )
 }
 
-impl TrapFrame {
-    pub fn to_pt_regs(&mut self) -> axprobe::PtRegs {
+#[cfg(feature = "kprobe")]
+impl From<&TrapFrame> for kprobe::PtRegs {
+    fn from(tf: &TrapFrame) -> Self {
         let regs = [0; 32];
         unsafe {
             core::ptr::copy_nonoverlapping(
-                &self.regs.zero as *const usize,
+                &tf.regs as *const GeneralRegisters as *const usize,
                 regs.as_ptr() as *mut usize,
                 32,
             );
         }
-        PtRegs {
+        kprobe::PtRegs {
             regs,
             orig_a0: 0,
-            csr_era: self.era,
+            csr_era: tf.era,
             csr_badvaddr: 0,
             csr_crmd: 0,
-            csr_prmd: self.prmd,
+            csr_prmd: tf.prmd,
             csr_euen: 0,
             csr_ecfg: 0,
             csr_estat: 0,
         }
     }
+}
 
-    pub fn update_from_pt_regs(&mut self, pt_regs: axprobe::PtRegs) {
+#[cfg(feature = "kprobe")]
+impl TrapFrame {
+    /// Update the TrapFrame from kprobe::PtRegs
+    pub fn update_from_ptregs(&mut self, ptregs: kprobe::PtRegs) {
         unsafe {
             core::ptr::copy_nonoverlapping(
-                pt_regs.regs.as_ptr() as *const usize,
-                &mut self.regs.zero as *mut usize,
+                ptregs.regs.as_ptr() as *const usize,
+                &mut self.regs as *mut GeneralRegisters as *mut usize,
                 32,
             );
         }
-        self.era = pt_regs.csr_era;
-        self.prmd = pt_regs.csr_prmd;
-        // other csr fields are ignored
+        self.era = ptregs.csr_era;
+        self.prmd = ptregs.csr_prmd;
     }
 }

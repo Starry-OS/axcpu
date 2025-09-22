@@ -30,13 +30,20 @@ fn handle_page_fault(tf: &TrapFrame) {
     }
 }
 
+fn handle_breakpoint(tf: &mut TrapFrame) {
+    debug!("#BP @ {:#x} ", tf.rip);
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
+        return;
+    }
+}
+
 #[unsafe(no_mangle)]
 fn x86_trap_handler(tf: &mut TrapFrame) {
     #[cfg(feature = "uspace")]
     super::uspace::switch_to_kernel_fs_base(tf);
     match tf.vector as u8 {
         PAGE_FAULT_VECTOR => handle_page_fault(tf),
-        BREAKPOINT_VECTOR => debug!("#BP @ {:#x} ", tf.rip),
+        BREAKPOINT_VECTOR => handle_breakpoint(tf),
         GENERAL_PROTECTION_FAULT_VECTOR => {
             panic!(
                 "#GP @ {:#x}, error_code={:#x}:\n{:#x?}\n{}",
