@@ -1,4 +1,5 @@
 use core::{arch::naked_asm, fmt};
+
 use memory_addr::VirtAddr;
 
 /// Saved registers when a trap (interrupt or exception) occurs.
@@ -24,7 +25,7 @@ pub struct TrapFrame {
 
     // Set by `tls.rs`
     pub fs_base: u64,
-    pub __pad: u64,
+    pub kernel_rsp: u64,
 
     // Pushed by `trap.S`
     pub vector: u64,
@@ -34,6 +35,7 @@ pub struct TrapFrame {
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
+    // 注意这里的 rsp 和 ss 只有在从用户态陷入内核态时 CPU 才会压入
     pub rsp: u64,
     pub ss: u64,
 }
@@ -147,6 +149,11 @@ impl TrapFrame {
     /// Unwind the stack and get the backtrace.
     pub fn backtrace(&self) -> axbacktrace::Backtrace {
         axbacktrace::Backtrace::capture_trap(self.rbp as _, self.rip as _, 0)
+    }
+
+    /// Gets the syscall number.
+    pub const fn sysno(&self) -> usize {
+        self.rax as usize
     }
 }
 
@@ -290,8 +297,9 @@ impl TaskContext {
     pub fn init(&mut self, entry: usize, kstack_top: VirtAddr, tls_area: VirtAddr) {
         unsafe {
             // x86_64 calling convention: the stack must be 16-byte aligned before
-            // calling a function. That means when entering a new task (`ret` in `context_switch`
-            // is executed), (stack pointer + 8) should be 16-byte aligned.
+            // calling a function. That means when entering a new task (`ret` in
+            // `context_switch` is executed), (stack pointer + 8) should be
+            // 16-byte aligned.
             let frame_ptr = (kstack_top.as_mut_ptr() as *mut u64).sub(1);
             let frame_ptr = (frame_ptr as *mut ContextSwitchFrame).sub(1);
             core::ptr::write(
@@ -318,8 +326,8 @@ impl TaskContext {
 
     /// Switches to another task.
     ///
-    /// It first saves the current task's context from CPU to this place, and then
-    /// restores the next task's context from `next_ctx` to CPU.
+    /// It first saves the current task's context from CPU to this place, and
+    /// then restores the next task's context from `next_ctx` to CPU.
     pub fn switch_to(&mut self, next_ctx: &Self) {
         #[cfg(feature = "fp-simd")]
         {
