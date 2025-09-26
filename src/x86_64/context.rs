@@ -34,6 +34,7 @@ pub struct TrapFrame {
     pub rip: u64,
     pub cs: u64,
     pub rflags: u64,
+    // 注意这里的 rsp 和 ss 只有在从用户态陷入内核态时 CPU 才会压入
     pub rsp: u64,
     pub ss: u64,
 }
@@ -147,6 +148,18 @@ impl TrapFrame {
     /// Unwind the stack and get the backtrace.
     pub fn backtrace(&self) -> axbacktrace::Backtrace {
         axbacktrace::Backtrace::capture_trap(self.rbp as _, self.rip as _, 0)
+    }
+
+    pub const fn sysno(&self) -> usize {
+        self.rax as usize
+    }
+
+    pub fn push_ra(&mut self, _ra: usize) {
+        // unsafe {
+        //     let sp = (self.rsp as *mut usize).sub(1);
+        //     core::ptr::write(sp, ra);
+        //     self.rsp = sp as u64;
+        // }
     }
 }
 

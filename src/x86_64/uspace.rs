@@ -1,14 +1,25 @@
 //! Structures and functions for user space.
 
 use memory_addr::VirtAddr;
+use x86::{
+    controlregs::{cr2, cr4},
+    irq::{BREAKPOINT_VECTOR, INVALID_OPCODE_VECTOR, PAGE_FAULT_VECTOR},
+};
 
-use crate::asm::{read_thread_pointer, write_thread_pointer};
-use crate::TrapFrame;
+use crate::{
+    asm::{read_thread_pointer, write_thread_pointer},
+    trap::{ExceptionKind, ReturnReason},
+    x86_64::trap::{err_code_to_flags, IRQ_VECTOR_END, IRQ_VECTOR_START},
+    TrapFrame,
+};
+
+const LEGACY_SYSCALL_VECTOR: u8 = 0x80;
 
 /// Context to enter user space.
-pub struct UspaceContext(TrapFrame);
+#[derive(Debug, Clone)]
+pub struct UserContext(TrapFrame);
 
-impl UspaceContext {
+impl UserContext {
     /// Creates an empty context with all registers set to zero.
     pub const fn empty() -> Self {
         unsafe { core::mem::MaybeUninit::zeroed().assume_init() }
@@ -17,8 +28,9 @@ impl UspaceContext {
     /// Creates a new context with the given entry point, user stack pointer,
     /// and the argument.
     pub fn new(entry: usize, ustack_top: VirtAddr, arg0: usize) -> Self {
-        use crate::GdtStruct;
         use x86_64::registers::rflags::RFlags;
+
+        use crate::GdtStruct;
         Self(TrapFrame {
             rdi: arg0 as _,
             rip: entry as _,
@@ -34,12 +46,56 @@ impl UspaceContext {
     ///
     /// It copies almost all registers except `CS` and `SS` which need to be
     /// set to the user segment selectors.
-    pub const fn from(tf: &TrapFrame) -> Self {
+    pub const fn from(mut tf: TrapFrame) -> Self {
         use crate::GdtStruct;
-        let mut tf = *tf;
         tf.cs = GdtStruct::UCODE64_SELECTOR.0 as _;
         tf.ss = GdtStruct::UDATA_SELECTOR.0 as _;
         Self(tf)
+    }
+
+    /// Enter user space.
+    ///
+    /// It restores the user registers and jumps to the user entry point
+    /// (saved in `sepc`).
+    ///
+    /// This function returns when an exception or syscall occurs.
+    pub fn run(&mut self) -> ReturnReason {
+        extern "C" {
+            fn enter_user(tf: &mut TrapFrame);
+        }
+
+        let tf = &mut self.0;
+        crate::asm::disable_irqs();
+        unsafe { enter_user(tf) };
+
+        // Trap handling for user space
+        switch_to_kernel_fs_base(tf);
+        let ret = match tf.vector as u8 {
+            // Page fault
+            PAGE_FAULT_VECTOR => {
+                let vaddr = va!(unsafe { cr2() });
+                let access_flags = err_code_to_flags(tf.error_code)
+                    .unwrap_or_else(|e| panic!("Invalid #PF error code: {:#x}", e));
+                ReturnReason::PageFault(vaddr, access_flags)
+            }
+            // Syscall
+            LEGACY_SYSCALL_VECTOR => ReturnReason::Syscall,
+            // Hardware IRQs
+            IRQ_VECTOR_START..=IRQ_VECTOR_END => {
+                handle_trap!(IRQ, tf.vector as _);
+                ReturnReason::Interrupt
+            }
+            // Other exceptions
+            _ => ReturnReason::Exception(ExceptionInfo {
+                trap_vector: tf.vector,
+                rip: tf.rip,
+                error_code: tf.error_code,
+                cr4: unsafe { cr4() }.bits(),
+            }),
+        };
+        switch_to_user_fs_base(tf);
+        crate::asm::enable_irqs();
+        ret
     }
 
     /// Enters user space.
@@ -77,8 +133,8 @@ impl UspaceContext {
                 add     rsp, 32     // skip fs_base, vector, error_code
                 swapgs
                 iretq",
-                tf = in(reg) &self.0,
-                options(noreturn),
+            tf = in(reg) &self.0,
+            options(noreturn),
             )
         }
     }
@@ -109,7 +165,7 @@ pub fn switch_to_user_fs_base(tf: &TrapFrame) {
     }
 }
 
-impl core::ops::Deref for UspaceContext {
+impl core::ops::Deref for UserContext {
     type Target = TrapFrame;
 
     fn deref(&self) -> &Self::Target {
@@ -117,8 +173,26 @@ impl core::ops::Deref for UspaceContext {
     }
 }
 
-impl core::ops::DerefMut for UspaceContext {
+impl core::ops::DerefMut for UserContext {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExceptionInfo {
+    pub trap_vector: u64,
+    pub rip: u64,
+    pub error_code: u64,
+    pub cr4: usize,
+}
+
+impl ExceptionInfo {
+    pub fn kind(&self) -> ExceptionKind {
+        match self.trap_vector as u8 {
+            BREAKPOINT_VECTOR => ExceptionKind::Breakpoint,
+            INVALID_OPCODE_VECTOR => ExceptionKind::IllegalInstruction,
+            _ => ExceptionKind::Other,
+        }
     }
 }
