@@ -6,13 +6,15 @@ use crate::trap::PageFaultFlags;
 
 core::arch::global_asm!(
     include_str!("trap.S"),
-    trapframe_size = const core::mem::size_of::<TrapFrame>()
+    trapframe_size = const core::mem::size_of::<TrapFrame>(),
+    kind_irq = const TrapKind::Irq as u8,
+    kind_sync = const TrapKind::Synchronous as u8,
 );
 
 #[repr(u8)]
 #[derive(Debug)]
 #[allow(dead_code)]
-enum TrapKind {
+pub(crate) enum TrapKind {
     Synchronous = 0,
     Irq = 1,
     Fiq = 2,
@@ -42,15 +44,23 @@ fn handle_irq_exception(_tf: &mut TrapFrame) {
     handle_trap!(IRQ, 0);
 }
 
-fn handle_instruction_abort(tf: &TrapFrame, iss: u64) {
+#[inline(always)]
+pub(crate) fn is_valid_page_fault(iss: u64) -> bool {
+    // Only handle Translation fault and Permission fault
+    matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
+}
+
+fn handle_instruction_abort(tf: &mut TrapFrame, iss: u64) {
     let access_flags = PageFaultFlags::EXECUTE;
     let vaddr = va!(FAR_EL1.get() as usize);
 
-    // TODO: fixup_exception
-    // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
+    if core::hint::likely(handle_trap!(PAGE_FAULT, vaddr, access_flags))
+        && is_valid_page_fault(iss)
     {
+        return;
+    }
+
+    if !tf.fixup_exception() {
         panic!(
             "Unhandled EL1 Instruction Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
             tf.elr,
@@ -63,21 +73,25 @@ fn handle_instruction_abort(tf: &TrapFrame, iss: u64) {
     }
 }
 
-fn handle_data_abort(tf: &TrapFrame, iss: u64) {
+pub(crate) fn data_abort_access_flags(iss: u64) -> PageFaultFlags {
     let wnr = (iss & (1 << 6)) != 0; // WnR: Write not Read
     let cm = (iss & (1 << 8)) != 0; // CM: Cache maintenance
-    let access_flags = if wnr & !cm {
+    if wnr & !cm {
         PageFaultFlags::WRITE
     } else {
         PageFaultFlags::READ
-    };
+    }
+}
+
+fn handle_data_abort(tf: &mut TrapFrame, iss: u64) {
+    let access_flags = data_abort_access_flags(iss);
     let vaddr = va!(FAR_EL1.get() as usize);
 
-    // TODO: fixup_exception
-    // Only handle Translation fault and Permission fault
-    if !matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
-        || !handle_trap!(PAGE_FAULT, vaddr, access_flags)
-    {
+    if core::hint::likely(handle_trap!(PAGE_FAULT, vaddr, access_flags)) {
+        return;
+    }
+
+    if !tf.fixup_exception() {
         panic!(
             "Unhandled EL1 Data Abort @ {:#x}, fault_vaddr={:#x}, ESR={:#x} ({:?}):\n{:#x?}\n{}",
             tf.elr,

@@ -6,7 +6,7 @@ use memory_addr::VirtAddr;
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 pub struct TrapFrame {
-    /// General-purpose registers (R0..R30).
+    /// General-purpose registers (X0..X30).
     pub r: [u64; 31],
     /// User Stack Pointer (SP_EL0).
     pub usp: u64,
@@ -142,6 +142,16 @@ impl TrapFrame {
     /// Sets the TLS area.
     pub const fn set_tls(&mut self, tls: usize) {
         self.tpidr = tls as _;
+    }
+
+    /// Get the syscall number.
+    pub const fn sysno(&self) -> usize {
+        self.r[8] as usize
+    }
+
+    /// Sets the syscall number.
+    pub const fn set_sysno(&mut self, sysno: usize) {
+        self.r[8] = sysno as _;
     }
 
     /// Unwind the stack and get the backtrace.

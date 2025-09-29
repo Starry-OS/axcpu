@@ -36,7 +36,7 @@
     # backup kernel tpidr_el0
     mrs     x1, tpidr_el0
     msr     tpidrro_el0, x1
-    
+
     ldp     x11, x12, [sp, 33 * 8]
     ldp     x9, x10, [sp, 31 * 8]
     msr     sp_el0, x9
@@ -73,6 +73,14 @@
     b       .Lexception_return
 .endm
 
+.macro HANDLE_USER, kind
+.p2align 7
+    SAVE_REGS
+    mov   x0, \kind
+    b _user_trap_entry
+
+.endm
+
 .macro HANDLE_SYNC
 .p2align 7
     SAVE_REGS
@@ -89,6 +97,7 @@
     b       .Lexception_return
 .endm
 
+
 .section .text
 .p2align 11
 .global exception_vector_base
@@ -99,25 +108,27 @@ exception_vector_base:
     INVALID_EXCP 2 0
     INVALID_EXCP 3 0
 
-    // current EL, with SP_ELx
+	// current EL, with SP_ELx
     HANDLE_SYNC
     HANDLE_IRQ
     INVALID_EXCP 2 1
     INVALID_EXCP 3 1
 
-    // TODO: handle user trap
-    // lower EL, aarch64
-    HANDLE_SYNC
-    HANDLE_IRQ
+	// lower EL, AArch64
+    HANDLE_USER {kind_sync}
+    HANDLE_USER {kind_irq}
     INVALID_EXCP 2 2
     INVALID_EXCP 3 2
 
-    // lower EL, aarch32
+	// lower EL, AArch32
     INVALID_EXCP 0 3
     INVALID_EXCP 1 3
     INVALID_EXCP 2 3
     INVALID_EXCP 3 3
 
+.section .text
+.global _user_entry
+_user_entry:
 .Lexception_return:
     RESTORE_REGS
     eret

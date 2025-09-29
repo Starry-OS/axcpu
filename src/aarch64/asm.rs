@@ -201,3 +201,19 @@ pub fn enable_fp() {
     CPACR_EL1.write(CPACR_EL1::FPEN::TrapNothing);
     barrier::isb(barrier::SY);
 }
+
+core::arch::global_asm!(include_str!("user_copy.S"));
+
+extern "C" {
+    /// Copy data from user space to kernel space safely.
+    ///
+    /// # Arguments
+    /// * `dst` - Destination pointer in kernel space
+    /// * `src` - Source pointer in user space
+    /// * `size` - Number of bytes to copy
+    ///
+    /// # Returns
+    /// * `0` - Success, all bytes copied
+    /// * `>0` - Number of bytes that could not be copied due to page fault
+    pub fn user_copy(dst: *mut u8, src: *const u8, size: usize) -> usize;
+}
