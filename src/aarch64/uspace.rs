@@ -130,7 +130,8 @@ impl UserContext {
             }
             _ => ReturnReason::Unknown,
         };
-        crate::asm::enable_irqs();
+        //TODO: irq enable when into kernel
+        //crate::asm::enable_irqs();
         ret
     }
 }
