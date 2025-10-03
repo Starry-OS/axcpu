@@ -24,7 +24,7 @@ pub struct TrapFrame {
 
     // Set by `tls.rs`
     pub fs_base: u64,
-    pub __pad: u64,
+    pub kernel_rsp: u64,
 
     // Pushed by `trap.S`
     pub vector: u64,

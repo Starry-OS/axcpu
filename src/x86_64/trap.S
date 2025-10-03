@@ -179,10 +179,9 @@ syscall_entry:
     push    r11                                     // rflags
     push    {ucode64}                               // cs
     push    rcx                                     // rip
-    // 压入伪造的trap_vector，我们约定使用0x80(LEGACY_SYSCALL_VECTOR)作为syscall的trap_vector
-    push    0x80
+
     // 没有错误代码，压入0
     push    0
-    # 一定来自用户态
-    swapgs
+    // 压入伪造的trap_vector，我们约定使用0x80(LEGACY_SYSCALL_VECTOR)作为syscall的trap_vector
+    push    0x80
     jmp     .Lsave_trap_frame
