@@ -27,6 +27,9 @@ _trap_handlers:
     .set i, i + 1
 .endr
 
+.section .text
+.code64
+trap_common_entry:
 .Ltrap_common:
     cld
     # CPU在进入异常时，会检查特权级，如果从低特权级进入高特权级，会自动切换栈（从TSS中获取并更新rsp和ss，同时将ss和rsp依次入栈）
@@ -60,18 +63,9 @@ _trap_handlers:
     push    rax
 
     // 检查CS，判断是否来自用户态
-    test    byte ptr [rsp + 21 * 8], 3
-    jz      .Ltrap_from_kernel
-    // 来自用户态，恢复原本的内核栈
-    mov     rsp, [rsp + 17 * 8]  # rsp = __pad
-    // 恢复callee-saved寄存器
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbp
-    pop     rbx
-    ret
+    test    byte ptr [rsp + 20 * 8], 3
+    jnz     go_back_to_kernel     // 来自用户态，恢复原本的内核栈
+    // 来自内核态
 
 .Ltrap_from_kernel:
     mov     rdi, rsp
@@ -101,6 +95,19 @@ _trap_handlers:
     add     rsp, 16                     # pop vector, error_code
     iretq
 
+.section .text
+.code64
+go_back_to_kernel:
+    mov     rsp, [rsp + 16 * 8]  # rsp = __pad
+    // 恢复callee-saved寄存器
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
 .section .rodata
 .global trap_handler_table
 trap_handler_table:
@@ -111,6 +118,8 @@ trap_handler_table:
 .endr
 
 .global enter_user
+.section .text
+.code64
 enter_user:
     // 现在是内核态，我们用类似协程的方式进入用户态
     // 参数是&mut TrapFrame (rdi)，表示用户的TrapFrame
@@ -124,7 +133,7 @@ enter_user:
     push r14
     push r15
     // 现在可以保存内核栈到TrapFrame中
-    mov [rsp + 17 * 8], rsp  // 保存内核栈指针到__pad
+    mov [rdi + 16 * 8], rsp  // 保存内核栈指针到__pad
     // mov gs:[offset __PERCPU_TSS + {tss_rsp0_offset}], rsp
     // TODO: TLS
 
