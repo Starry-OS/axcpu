@@ -66,10 +66,10 @@ impl UserContext {
 
         let tf = &mut self.0;
         crate::asm::disable_irqs();
+        switch_to_user_fs_base(tf);
         unsafe { enter_user(tf) };
-
+        switch_to_kernel_fs_base(tf);
         // Trap handling for user space
-        // switch_to_kernel_fs_base(tf);
         let ret = match tf.vector as u8 {
             // Page fault
             PAGE_FAULT_VECTOR => {
@@ -93,7 +93,6 @@ impl UserContext {
                 cr4: unsafe { cr4() }.bits(),
             }),
         };
-        // switch_to_user_fs_base(tf);
         crate::asm::enable_irqs();
         ret
     }
