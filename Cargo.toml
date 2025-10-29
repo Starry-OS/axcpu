@@ -39,7 +39,7 @@ page_table_entry = "0.5"
 static_assertions = "1.1.0"
 
 [target.'cfg(not(target_arch = "aarch64"))'.dependencies]
-kprobe = { git = "https://github.com/Starry-OS/kprobe", rev = "318cbb2", optional = true }
+kprobe = { git = "https://github.com/Starry-OS/kprobe", optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 lazyinit = "0.2"
