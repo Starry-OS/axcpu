@@ -19,6 +19,10 @@ pub static PAGE_FAULT: [fn(VirtAddr, PageFaultFlags) -> bool];
 #[def_trap_handler]
 pub static BREAK_HANDLER: [fn(&mut TrapFrame) -> bool];
 
+/// A slice of debug handler functions.
+#[def_trap_handler]
+pub static DEBUG_HANDLER: [fn(&mut TrapFrame) -> bool];
+
 #[allow(unused_macros)]
 macro_rules! handle_trap {
     ($trap:ident, $($args:tt)*) => {{

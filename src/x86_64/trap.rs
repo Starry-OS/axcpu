@@ -46,10 +46,18 @@ fn handle_breakpoint(tf: &mut TrapFrame) {
     }
 }
 
+fn handle_debug(tf: &mut TrapFrame) {
+    debug!("#DB @ {:#x} ", tf.rip);
+    if core::hint::likely(handle_trap!(DEBUG_HANDLER, tf)) {
+        return;
+    }
+}
+
 #[unsafe(no_mangle)]
 fn x86_trap_handler(tf: &mut TrapFrame) {
     match tf.vector as u8 {
         PAGE_FAULT_VECTOR => handle_page_fault(tf),
+        DEBUG_VECTOR => handle_debug(tf),
         BREAKPOINT_VECTOR => handle_breakpoint(tf),
         GENERAL_PROTECTION_FAULT_VECTOR => {
             panic!(
