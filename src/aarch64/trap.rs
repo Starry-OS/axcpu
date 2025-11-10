@@ -41,6 +41,14 @@ pub(super) fn is_valid_page_fault(iss: u64) -> bool {
     matches!(iss & 0b111100, 0b0100 | 0b1100) // IFSC or DFSC bits
 }
 
+fn handle_breakpoint(tf: &mut TrapFrame, iss: u64) {
+    debug!("BRK #{:#x} @ {:#x} ", iss, tf.elr);
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf, iss)) {
+        return;
+    }
+    tf.elr += 4;
+}
+
 fn handle_page_fault(tf: &mut TrapFrame, access_flags: PageFaultFlags) {
     let vaddr = va!(FAR_EL1.get() as usize);
     if handle_trap!(PAGE_FAULT, vaddr, access_flags) {
@@ -99,10 +107,7 @@ fn aarch64_trap_handler(tf: &mut TrapFrame, kind: TrapKind, source: TrapSource) 
                         },
                     );
                 }
-                Some(ESR_EL1::EC::Value::Brk64) => {
-                    debug!("BRK #{:#x} @ {:#x} ", iss, tf.elr);
-                    tf.elr += 4;
-                }
+                Some(ESR_EL1::EC::Value::Brk64) => handle_breakpoint(tf, iss),
                 e => {
                     let vaddr = va!(FAR_EL1.get() as usize);
                     panic!(

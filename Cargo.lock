@@ -90,7 +90,7 @@ checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
 [[package]]
 name = "kprobe"
 version = "0.1.0"
-source = "git+https://github.com/Starry-OS/kprobe#318cbb242ec8285903a909433fdf8da54554b324"
+source = "git+https://github.com/Starry-OS/kprobe#c5e419f4d4171d0ab0bc00ff5423e4c39b5a4fef"
 dependencies = [
  "cfg-if",
  "lock_api",

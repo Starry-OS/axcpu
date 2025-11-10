@@ -19,7 +19,7 @@ core::arch::global_asm!(
 
 fn handle_breakpoint(tf: &mut TrapFrame) {
     debug!("Exception(Breakpoint) @ {:#x} ", tf.sepc);
-    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf, 0)) {
         return;
     }
     tf.sepc += 2; // skip ebreak instruction

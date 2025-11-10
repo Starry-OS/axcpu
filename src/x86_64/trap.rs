@@ -41,7 +41,7 @@ fn handle_page_fault(tf: &mut TrapFrame) {
 
 fn handle_breakpoint(tf: &mut TrapFrame) {
     debug!("#BP @ {:#x} ", tf.rip);
-    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf, 0)) {
         return;
     }
 }

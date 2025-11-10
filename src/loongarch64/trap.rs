@@ -14,7 +14,7 @@ core::arch::global_asm!(
 
 fn handle_breakpoint(tf: &mut TrapFrame) {
     debug!("Exception(Breakpoint) @ {:#x} ", tf.era);
-    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf)) {
+    if core::hint::likely(handle_trap!(BREAK_HANDLER, tf, 0)) {
         return;
     }
     tf.era += 4;

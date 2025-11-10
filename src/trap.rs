@@ -17,7 +17,7 @@ pub static PAGE_FAULT: [fn(VirtAddr, PageFaultFlags) -> bool];
 
 /// A slice of breakpoint handler functions.
 #[def_trap_handler]
-pub static BREAK_HANDLER: [fn(&mut TrapFrame) -> bool];
+pub static BREAK_HANDLER: [fn(&mut TrapFrame, arg:u64) -> bool];
 
 /// A slice of debug handler functions.
 #[def_trap_handler]
