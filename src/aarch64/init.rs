@@ -91,6 +91,7 @@ pub unsafe fn init_mmu(root_paddr: PhysAddr) {
 
     // Enable the MMU and turn on I-cache and D-cache
     SCTLR_EL1.modify(SCTLR_EL1::M::Enable + SCTLR_EL1::C::Cacheable + SCTLR_EL1::I::Cacheable);
+    // Disable SPAN
     barrier::isb(barrier::SY);
 }
 
