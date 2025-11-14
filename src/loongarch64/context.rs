@@ -259,8 +259,8 @@ impl TaskContext {
 
     /// Switches to another task.
     ///
-    /// It first saves the current task's context from CPU to this place, and then
-    /// restores the next task's context from `next_ctx` to CPU.
+    /// It first saves the current task's context from CPU to this place, and
+    /// then restores the next task's context from `next_ctx` to CPU.
     pub fn switch_to(&mut self, next_ctx: &Self) {
         #[cfg(feature = "tls")]
         {
@@ -352,4 +352,45 @@ unsafe extern "C" fn context_switch(_current_task: &mut TaskContext, _next_task:
 
         ret",
     )
+}
+
+#[cfg(feature = "kprobe")]
+impl From<&TrapFrame> for kprobe::PtRegs {
+    fn from(tf: &TrapFrame) -> Self {
+        let regs = [0; 32];
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                &tf.regs as *const GeneralRegisters as *const usize,
+                regs.as_ptr() as *mut usize,
+                32,
+            );
+        }
+        kprobe::PtRegs {
+            regs,
+            orig_a0: 0,
+            csr_era: tf.era,
+            csr_badvaddr: 0,
+            csr_crmd: 0,
+            csr_prmd: tf.prmd,
+            csr_euen: 0,
+            csr_ecfg: 0,
+            csr_estat: 0,
+        }
+    }
+}
+
+#[cfg(feature = "kprobe")]
+impl TrapFrame {
+    /// Update the TrapFrame from kprobe::PtRegs
+    pub fn update_from_ptregs(&mut self, ptregs: kprobe::PtRegs) {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                ptregs.regs.as_ptr() as *const usize,
+                &mut self.regs as *mut GeneralRegisters as *mut usize,
+                32,
+            );
+        }
+        self.era = ptregs.csr_era;
+        self.prmd = ptregs.csr_prmd;
+    }
 }
