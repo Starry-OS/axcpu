@@ -31,6 +31,34 @@ impl fmt::Debug for TrapFrame {
     }
 }
 
+#[cfg(feature = "kprobe")]
+impl From<&TrapFrame> for kprobe::PtRegs {
+    fn from(tf: &TrapFrame) -> Self {
+        use core::u64;
+
+        use kprobe::PtRegs;
+        PtRegs {
+            regs: tf.x,
+            sp: u64::MAX,
+            pc: tf.elr,
+            pstate: tf.spsr,
+            orig_x0: u64::MAX,
+            syscallno: -1,
+            unused2: 0,
+        }
+    }
+}
+
+#[cfg(feature = "kprobe")]
+impl TrapFrame {
+    /// Update the TrapFrame from kprobe::PtRegs
+    pub fn update_from_ptregs(&mut self, ptregs: kprobe::PtRegs) {
+        self.x = ptregs.regs;
+        self.spsr = ptregs.pstate;
+        self.elr = ptregs.pc;
+    }
+}
+
 impl TrapFrame {
     /// Gets the 0th syscall argument.
     pub const fn arg0(&self) -> usize {
