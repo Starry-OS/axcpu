@@ -143,6 +143,7 @@ impl ExceptionInfo {
     /// Returns a generalized kind of this exception.
     pub fn kind(&self) -> ExceptionKind {
         match ExceptionVector::try_from(self.vector) {
+            Ok(ExceptionVector::Debug) => ExceptionKind::Debug,
             Ok(ExceptionVector::Breakpoint) => ExceptionKind::Breakpoint,
             Ok(ExceptionVector::InvalidOpcode) => ExceptionKind::IllegalInstruction,
             _ => ExceptionKind::Other,
